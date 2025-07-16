@@ -6,7 +6,7 @@ use {
     crate::{
         post_processing::post_process,
         toolchain::{
-            corrupted_toolchain, get_base_rust_version, install_tools,
+            corrupted_toolchain, generate_toolchain_name, get_base_rust_version, install_tools,
             DEFAULT_PLATFORM_TOOLS_VERSION,
         },
         utils::{rust_target_triple, spawn},
@@ -88,7 +88,11 @@ pub fn is_version_string(arg: &str) -> Result<(), String> {
     if semver_re.is_match(arg) {
         return Ok(());
     }
-    Err("a version string may start with 'v' and contains major and minor version numbers separated by a dot, e.g. v1.32 or 1.32".to_string())
+    Err(
+        "a version string may start with 'v' and contains major and minor version numbers \
+         separated by a dot, e.g. v1.32 or 1.32"
+            .to_string(),
+    )
 }
 
 fn home_dir() -> PathBuf {
@@ -134,7 +138,7 @@ fn prepare_environment(
     config: &Config,
     package: Option<&cargo_metadata::Package>,
     metadata: &cargo_metadata::Metadata,
-) {
+) -> String {
     let root_dir = if let Some(package) = package {
         &package.manifest_path.parent().unwrap_or_else(|| {
             error!("Unable to get directory of {}", package.manifest_path);
@@ -145,14 +149,14 @@ fn prepare_environment(
     };
 
     env::set_current_dir(root_dir).unwrap_or_else(|err| {
-        error!("Unable to set current directory to {}: {}", root_dir, err);
+        error!("Unable to set current directory to {root_dir}: {err}");
         exit(1);
     });
 
-    install_tools(config, package, metadata);
+    install_tools(config, package, metadata)
 }
 
-fn invoke_cargo(config: &Config) {
+fn invoke_cargo(config: &Config, validated_toolchain_version: String) {
     let target_triple = rust_target_triple(config);
 
     info!("Solana SDK: {}", config.sbf_sdk.display());
@@ -166,7 +170,7 @@ fn invoke_cargo(config: &Config) {
     if corrupted_toolchain(config) {
         error!(
             "The Solana toolchain is corrupted. Please, run cargo-build-sbf with the \
-        --force-tools-install argument to fix it."
+             --force-tools-install argument to fix it."
         );
         exit(1);
     }
@@ -188,10 +192,7 @@ fn invoke_cargo(config: &Config) {
     );
     let rustflags = env::var("RUSTFLAGS").ok().unwrap_or_default();
     if env::var("RUSTFLAGS").is_ok() {
-        warn!(
-            "Removed RUSTFLAGS from cargo environment, because it overrides {}.",
-            cargo_target,
-        );
+        warn!("Removed RUSTFLAGS from cargo environment, because it overrides {cargo_target}.");
         env::remove_var("RUSTFLAGS")
     }
     let target_rustflags = env::var(&cargo_target).ok();
@@ -226,8 +227,11 @@ fn invoke_cargo(config: &Config) {
 
     let cargo_build = PathBuf::from("cargo");
     let mut cargo_build_args = vec![];
+    let toolchain_name = generate_toolchain_name(validated_toolchain_version.as_str());
+    let toolchain_argument = format!("+{toolchain_name}");
+
     if !config.no_rustup_override {
-        cargo_build_args.push("+solana");
+        cargo_build_args.push(toolchain_argument.as_str());
     };
 
     cargo_build_args.append(&mut vec!["build", "--release", "--target", &target_triple]);
@@ -256,7 +260,7 @@ fn invoke_cargo(config: &Config) {
     );
 
     if config.verbose {
-        debug!("{}", output);
+        debug!("{output}");
     }
 }
 
@@ -275,10 +279,13 @@ fn generate_program_name(package: &cargo_metadata::Package) -> Option<String> {
                 };
 
                 if let Some(other_crate) = other_crate_type {
-                    warn!("Package '{}' has two crate types defined: cdylib and {}. \
-                        This setting precludes link-time optimizations (LTO). Use cdylib for programs \
-                        to be deployed and rlib for packages to be imported by other programs as libraries.",
-                        package.name, other_crate);
+                    warn!(
+                        "Package '{}' has two crate types defined: cdylib and {}. This setting \
+                         precludes link-time optimizations (LTO). Use cdylib for programs to be \
+                         deployed and rlib for packages to be imported by other programs as \
+                         libraries.",
+                        package.name, other_crate
+                    );
                 }
 
                 Some(&target.name)
@@ -311,7 +318,7 @@ fn build_solana(config: Config, manifest_path: Option<PathBuf>) {
     }
 
     let metadata = metadata_command.exec().unwrap_or_else(|err| {
-        error!("Failed to obtain package metadata: {}", err);
+        error!("Failed to obtain package metadata: {err}");
         exit(1);
     });
 
@@ -323,15 +330,16 @@ fn build_solana(config: Config, manifest_path: Option<PathBuf>) {
     if let Some(root_package) = metadata.root_package() {
         if !config.workspace {
             let program_name = generate_program_name(root_package);
-            prepare_environment(&config, Some(root_package), &metadata);
-            invoke_cargo(&config);
+            let validated_toolchain_version =
+                prepare_environment(&config, Some(root_package), &metadata);
+            invoke_cargo(&config, validated_toolchain_version);
             post_process(&config, target_dir.as_ref(), program_name);
             return;
         }
     }
 
-    prepare_environment(&config, None, &metadata);
-    invoke_cargo(&config);
+    let validated_toolchain_version = prepare_environment(&config, None, &metadata);
+    invoke_cargo(&config, validated_toolchain_version);
 
     let all_sbf_packages = metadata
         .packages
@@ -443,14 +451,21 @@ fn main() {
                 .long("skip-tools-install")
                 .takes_value(false)
                 .conflicts_with("force_tools_install")
-                .help("Skip downloading and installing platform-tools, assuming they are properly mounted"),
-            )
-            .arg(
-                Arg::new("no_rustup_override")
+                .help(
+                    "Skip downloading and installing platform-tools, assuming they are properly \
+                     mounted",
+                ),
+        )
+        .arg(
+            Arg::new("no_rustup_override")
                 .long("no-rustup-override")
                 .takes_value(false)
                 .conflicts_with("force_tools_install")
-                .help("Do not use rustup to manage the toolchain. By default, cargo-build-sbf invokes rustup to find the Solana rustc using a `+solana` toolchain override. This flag disables that behavior."),
+                .help(
+                    "Do not use rustup to manage the toolchain. By default, cargo-build-sbf \
+                     invokes rustup to find the Solana rustc using a `+solana` toolchain \
+                     override. This flag disables that behavior.",
+                ),
         )
         .arg(
             Arg::new("generate_child_script_on_failure")
@@ -521,16 +536,16 @@ fn main() {
             Arg::new("optimize_size")
                 .long("optimize-size")
                 .takes_value(false)
-                .help("Optimize program for size. This option may reduce program size, potentially increasing CU consumption.")
+                .help(
+                    "Optimize program for size. This option may reduce program size, potentially \
+                     increasing CU consumption.",
+                ),
         )
-        .arg(
-            Arg::new("lto")
-                .long("lto")
-                .takes_value(false)
-                .help("Enable Link-Time Optimization (LTO) for all crates being built. \
-                This option may decrease program size and CU consumption. The default option is LTO \
-                disabled, as one may get mixed results with it.")
-        )
+        .arg(Arg::new("lto").long("lto").takes_value(false).help(
+            "Enable Link-Time Optimization (LTO) for all crates being built. This option may \
+             decrease program size and CU consumption. The default option is LTO disabled, as one \
+             may get mixed results with it.",
+        ))
         .get_matches_from(args);
 
     let sbf_sdk: PathBuf = matches.value_of_t_or_exit("sbf_sdk");
@@ -605,8 +620,8 @@ fn main() {
     };
     let manifest_path: Option<PathBuf> = matches.value_of_t("manifest_path").ok();
     if config.verbose {
-        debug!("{:?}", config);
-        debug!("manifest_path: {:?}", manifest_path);
+        debug!("{config:?}");
+        debug!("manifest_path: {manifest_path:?}");
     }
     build_solana(config, manifest_path);
 }

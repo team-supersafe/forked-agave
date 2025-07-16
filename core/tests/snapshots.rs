@@ -123,7 +123,6 @@ fn restore_from_snapshot(
     let old_bank_forks = old_bank_forks.read().unwrap();
     let old_last_bank = old_bank_forks.get(old_last_slot).unwrap();
 
-    let check_hash_calculation = false;
     let full_snapshot_archive_path = snapshot_utils::build_full_snapshot_archive_path(
         &snapshot_config.full_snapshot_archives_dir,
         old_last_bank.slot(),
@@ -143,7 +142,6 @@ fn restore_from_snapshot(
         None,
         None,
         None,
-        check_hash_calculation,
         false,
         false,
         false,
@@ -210,7 +208,7 @@ where
                 .unwrap()
                 .set_root(bank.slot(), Some(&snapshot_controller), None)
                 .unwrap();
-            snapshot_request_handler.handle_snapshot_requests(false, 0, &AtomicBool::new(false));
+            snapshot_request_handler.handle_snapshot_requests(0, &AtomicBool::new(false));
         }
     }
 
@@ -450,7 +448,7 @@ fn test_bank_forks_incremental_snapshot() {
                 .unwrap()
                 .set_root(bank.slot(), Some(&snapshot_controller), None)
                 .unwrap();
-            snapshot_request_handler.handle_snapshot_requests(false, 0, &AtomicBool::new(false));
+            snapshot_request_handler.handle_snapshot_requests(0, &AtomicBool::new(false));
         }
 
         // Since AccountsBackgroundService isn't running, manually make a full snapshot archive
@@ -549,7 +547,6 @@ fn restore_from_snapshots_and_check_banks_are_equal(
         None,
         None,
         None,
-        false,
         false,
         false,
         false,
@@ -767,7 +764,6 @@ fn test_snapshots_with_background_services(verify_snapshot_hash_kind: VerifySnap
         None,
         None,
         None,
-        false,
         false,
         false,
         false,

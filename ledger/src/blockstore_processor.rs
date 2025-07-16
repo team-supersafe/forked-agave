@@ -846,7 +846,6 @@ pub struct ProcessOptions {
     pub accounts_db_config: Option<AccountsDbConfig>,
     pub verify_index: bool,
     pub runtime_config: RuntimeConfig,
-    pub on_halt_store_hash_raw_data_for_debug: bool,
     /// true if after processing the contents of the blockstore at startup, we should run an accounts hash calc
     /// This is useful for debugging.
     pub run_final_accounts_hash_calc: bool,
@@ -1846,7 +1845,6 @@ fn load_frozen_forks(
         opts,
     )?;
 
-    let on_halt_store_hash_raw_data_for_debug = opts.on_halt_store_hash_raw_data_for_debug;
     if Some(bank_forks.read().unwrap().root()) != opts.halt_at_slot {
         let recyclers = VerifyRecyclers::default();
         let mut all_banks = HashMap::new();
@@ -2009,7 +2007,7 @@ fn load_frozen_forks(
                 .unwrap_or(false);
             if done_processing {
                 if opts.run_final_accounts_hash_calc {
-                    bank.run_final_hash_calc(on_halt_store_hash_raw_data_for_debug);
+                    bank.run_final_hash_calc();
                 }
                 break;
             }
@@ -2023,12 +2021,8 @@ fn load_frozen_forks(
                 opts,
             )?;
         }
-    } else if on_halt_store_hash_raw_data_for_debug {
-        bank_forks
-            .read()
-            .unwrap()
-            .root_bank()
-            .run_final_hash_calc(on_halt_store_hash_raw_data_for_debug);
+    } else if opts.run_final_accounts_hash_calc {
+        bank_forks.read().unwrap().root_bank().run_final_hash_calc();
     }
 
     Ok((total_slots_processed, total_rooted_slots))
@@ -2298,7 +2292,7 @@ pub mod tests {
         solana_vote::{vote_account::VoteAccount, vote_transaction},
         solana_vote_program::{
             self,
-            vote_state::{TowerSync, VoteState, VoteStateVersions, MAX_LOCKOUT_HISTORY},
+            vote_state::{TowerSync, VoteStateV3, VoteStateVersions, MAX_LOCKOUT_HISTORY},
         },
         std::{collections::BTreeSet, slice, sync::RwLock},
         test_case::{test_case, test_matrix},
@@ -4744,12 +4738,15 @@ pub mod tests {
             roots_stakes
                 .into_iter()
                 .map(|(root, stake)| {
-                    let mut vote_state = VoteState::default();
+                    let mut vote_state = VoteStateV3::default();
                     vote_state.root_slot = Some(root);
-                    let mut vote_account =
-                        AccountSharedData::new(1, VoteState::size_of(), &solana_vote_program::id());
+                    let mut vote_account = AccountSharedData::new(
+                        1,
+                        VoteStateV3::size_of(),
+                        &solana_vote_program::id(),
+                    );
                     let versioned = VoteStateVersions::new_current(vote_state);
-                    VoteState::serialize(&versioned, vote_account.data_as_mut_slice()).unwrap();
+                    VoteStateV3::serialize(&versioned, vote_account.data_as_mut_slice()).unwrap();
                     (
                         solana_pubkey::new_rand(),
                         (stake, VoteAccount::try_from(vote_account).unwrap()),

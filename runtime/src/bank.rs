@@ -76,7 +76,7 @@ use {
         accounts::{AccountAddressFilter, Accounts, PubkeyAccountSlot},
         accounts_db::{
             AccountStorageEntry, AccountsDb, AccountsDbConfig, CalcAccountsHashDataSource,
-            DuplicatesLtHash, PubkeyHashAccount, VerifyAccountsHashAndLamportsConfig,
+            DuplicatesLtHash, PubkeyHashAccount,
         },
         accounts_hash::{
             AccountsHash, AccountsLtHash, CalcAccountsHashConfig, HashStats,
@@ -198,10 +198,8 @@ pub use {partitioned_epoch_rewards::KeyedRewardsAndNumPartitions, solana_reward_
 
 /// params to `verify_accounts_hash`
 struct VerifyAccountsHashConfig {
-    ignore_mismatch: bool,
     require_rooted_bank: bool,
     run_in_background: bool,
-    store_hash_raw_data_for_debug: bool,
 }
 
 mod accounts_lt_hash;
@@ -1691,12 +1689,7 @@ impl Bank {
     ///   in the past
     /// * Adjusts the new bank's tick height to avoid having to run PoH for millions of slots
     /// * Freezes the new bank, assuming that the user will `Bank::new_from_parent` from this bank
-    pub fn warp_from_parent(
-        parent: Arc<Bank>,
-        collector_id: &Pubkey,
-        slot: Slot,
-        _data_source: CalcAccountsHashDataSource, // will be removed next
-    ) -> Self {
+    pub fn warp_from_parent(parent: Arc<Bank>, collector_id: &Pubkey, slot: Slot) -> Self {
         parent.freeze();
         let parent_timestamp = parent.clock().unix_timestamp;
         let mut new = Bank::new_from_parent(parent, collector_id, slot);
@@ -2549,34 +2542,6 @@ impl Bank {
                 // updating the accounts lt hash must happen *outside* of hash_internal_state() so
                 // that rehash() can be called and *not* modify self.accounts_lt_hash.
                 self.update_accounts_lt_hash();
-
-                // For lattice-hash R&D, we have a CLI arg to do extra verfication.  If set, we'll
-                // re-calculate the accounts lt hash every slot and compare it against the value
-                // already stored in the bank.
-                if self
-                    .rc
-                    .accounts
-                    .accounts_db
-                    .verify_experimental_accumulator_hash
-                {
-                    let slot = self.slot();
-                    info!("Verifying the accounts lt hash for slot {slot}...");
-                    let (calculated_accounts_lt_hash, duration) = meas_dur!({
-                        self.rc
-                            .accounts
-                            .accounts_db
-                            .calculate_accounts_lt_hash_at_startup_from_index(&self.ancestors, slot)
-                    });
-                    let actual_accounts_lt_hash = self.accounts_lt_hash.lock().unwrap();
-                    assert_eq!(
-                        calculated_accounts_lt_hash,
-                        *actual_accounts_lt_hash,
-                        "Verifying the accounts lt hash for slot {slot} failed! calculated checksum: {}, actual checksum: {}",
-                        calculated_accounts_lt_hash.0.checksum(),
-                        actual_accounts_lt_hash.0.checksum(),
-                    );
-                    info!("Verifying the accounts lt hash for slot {slot}... Done successfully in {duration:?}");
-                }
             }
             *hash = self.hash_internal_state();
             self.rc.accounts.accounts_db.mark_slot_frozen(self.slot());
@@ -4608,16 +4573,13 @@ impl Bank {
 
     /// Used by ledger tool to run a final hash calculation once all ledger replay has completed.
     /// This should not be called by validator code.
-    pub fn run_final_hash_calc(&self, on_halt_store_hash_raw_data_for_debug: bool) {
+    pub fn run_final_hash_calc(&self) {
         self.force_flush_accounts_cache();
         // note that this slot may not be a root
         _ = self.verify_accounts_hash(
-            None,
             VerifyAccountsHashConfig {
-                ignore_mismatch: true,
                 require_rooted_bank: false,
                 run_in_background: false,
-                store_hash_raw_data_for_debug: on_halt_store_hash_raw_data_for_debug,
             },
             None,
         );
@@ -4629,16 +4591,9 @@ impl Bank {
     #[must_use]
     fn verify_accounts_hash(
         &self,
-        base: Option<(Slot, /*capitalization*/ u64)>,
         mut config: VerifyAccountsHashConfig,
         duplicates_lt_hash: Option<Box<DuplicatesLtHash>>,
     ) -> bool {
-        #[derive(Debug, Eq, PartialEq)]
-        enum VerifyKind {
-            Merkle,
-            Lattice,
-        }
-
         let accounts = &self.rc.accounts;
         // Wait until initial hash calc is complete before starting a new hash calc.
         // This should only occur when we halt at a slot in ledger-tool.
@@ -4649,23 +4604,12 @@ impl Bank {
 
         let slot = self.slot();
 
-        let verify_kind = match (
-            duplicates_lt_hash.is_some(),
-            self.rc
-                .accounts
-                .accounts_db
-                .is_experimental_accumulator_hash_enabled(),
-        ) {
-            (true, _) => VerifyKind::Lattice,
-            (false, false) => VerifyKind::Merkle,
-            (false, true) => {
-                // Calculating the accounts lt hash from storages *requires* a duplicates_lt_hash.
-                // If it is None here, then we must use the index instead, which also means we
-                // cannot run in the background.
-                config.run_in_background = false;
-                VerifyKind::Lattice
-            }
-        };
+        if duplicates_lt_hash.is_none() {
+            // Calculating the accounts lt hash from storages *requires* a duplicates_lt_hash.
+            // If it is None here, then we must use the index instead, which also means we
+            // cannot run in the background.
+            config.run_in_background = false;
+        }
 
         if config.require_rooted_bank && !accounts.accounts_db.accounts_index.is_alive_root(slot) {
             if let Some(parent) = self.parent() {
@@ -4673,13 +4617,11 @@ impl Bank {
                     "slot {slot} is not a root, so verify accounts hash on parent bank at slot {}",
                     parent.slot(),
                 );
-                if verify_kind == VerifyKind::Lattice {
-                    // The duplicates_lt_hash is only valid for the current slot, so we must fall
-                    // back to verifying the accounts lt hash with the index (which also means we
-                    // cannot run in the background).
-                    config.run_in_background = false;
-                }
-                return parent.verify_accounts_hash(base, config, None);
+                // The duplicates_lt_hash is only valid for the current slot, so we must fall
+                // back to verifying the accounts lt hash with the index (which also means we
+                // cannot run in the background).
+                config.run_in_background = false;
+                return parent.verify_accounts_hash(config, None);
             } else {
                 // this will result in mismatch errors
                 // accounts hash calc doesn't include unrooted slots
@@ -4691,25 +4633,14 @@ impl Bank {
         // Otherwise, it is possible that a delayed call to `get_snapshot_storages()` will *not*
         // get the correct storages required to calculate and verify the accounts hashes.
         let snapshot_storages = self.rc.accounts.accounts_db.get_storages(RangeFull);
-        let capitalization = self.capitalization();
-        let verify_config = VerifyAccountsHashAndLamportsConfig {
-            ancestors: &self.ancestors,
-            epoch_schedule: self.epoch_schedule(),
-            epoch: self.epoch(),
-            ignore_mismatch: config.ignore_mismatch,
-            store_detailed_debug_info: config.store_hash_raw_data_for_debug,
-            use_bg_thread_pool: config.run_in_background,
-        };
 
         info!(
-            "Verifying accounts, in background? {}, verify kind: {verify_kind:?}",
+            "Verifying accounts, in background? {}",
             config.run_in_background,
         );
         if config.run_in_background {
             let accounts = Arc::clone(accounts);
             let accounts_ = Arc::clone(&accounts);
-            let ancestors = self.ancestors.clone();
-            let epoch_schedule = self.epoch_schedule().clone();
             let expected_accounts_lt_hash = self.accounts_lt_hash.lock().unwrap().clone();
             accounts.accounts_db.verify_accounts_hash_in_bg.start(|| {
                 Builder::new()
@@ -4717,71 +4648,32 @@ impl Bank {
                     .spawn(move || {
                         info!("Initial background accounts hash verification has started");
                         let start = Instant::now();
-                        let mut lattice_verify_time = None;
-                        let mut merkle_verify_time = None;
-                        let is_ok = match verify_kind {
-                            VerifyKind::Lattice => {
-                                // accounts lt hash is *enabled* so use lattice-based verification
-                                let accounts_db = &accounts_.accounts_db;
-                                let (calculated_accounts_lt_hash, duration) =
-                                    meas_dur!(accounts_db.thread_pool_hash.install(|| {
-                                        accounts_db
-                                            .calculate_accounts_lt_hash_at_startup_from_storages(
-                                                snapshot_storages.0.as_slice(),
-                                                &duplicates_lt_hash.unwrap(),
-                                            )
-                                    }));
-                                let is_ok =
-                                    calculated_accounts_lt_hash == expected_accounts_lt_hash;
-                                if !is_ok {
-                                    let expected = expected_accounts_lt_hash.0.checksum();
-                                    let calculated = calculated_accounts_lt_hash.0.checksum();
-                                    error!(
-                                        "Verifying accounts failed: accounts lattice hashes do not \
-                                         match, expected: {expected}, calculated: {calculated}",
-                                    );
-                                }
-                                lattice_verify_time = Some(duration);
-                                is_ok
-                            }
-                            VerifyKind::Merkle => {
-                                // accounts lt hash is *disabled* so use merkle-based verification
-                                let snapshot_storages_and_slots = (
+                        let accounts_db = &accounts_.accounts_db;
+                        let (calculated_accounts_lt_hash, lattice_verify_time) =
+                            meas_dur!(accounts_db.thread_pool_hash.install(|| {
+                                accounts_db.calculate_accounts_lt_hash_at_startup_from_storages(
                                     snapshot_storages.0.as_slice(),
-                                    snapshot_storages.1.as_slice(),
-                                );
-                                let (is_ok, duration) = meas_dur!(accounts_
-                                    .verify_accounts_hash_and_lamports(
-                                        snapshot_storages_and_slots,
-                                        slot,
-                                        capitalization,
-                                        base,
-                                        VerifyAccountsHashAndLamportsConfig {
-                                            ancestors: &ancestors,
-                                            epoch_schedule: &epoch_schedule,
-                                            ..verify_config
-                                        },
-                                    ));
-                                merkle_verify_time = Some(duration);
-                                is_ok
-                            }
-                        };
-                        accounts_
-                            .accounts_db
-                            .verify_accounts_hash_in_bg
-                            .background_finished();
+                                    &duplicates_lt_hash.unwrap(),
+                                )
+                            }));
+                        let is_ok = calculated_accounts_lt_hash == expected_accounts_lt_hash;
+                        if !is_ok {
+                            let expected = expected_accounts_lt_hash.0.checksum();
+                            let calculated = calculated_accounts_lt_hash.0.checksum();
+                            error!(
+                                "Verifying accounts failed: accounts lattice hashes do not \
+                                    match, expected: {expected}, calculated: {calculated}",
+                            );
+                        }
+                        accounts_db.verify_accounts_hash_in_bg.background_finished();
                         let total_time = start.elapsed();
                         datapoint_info!(
                             "startup_verify_accounts",
                             ("total_us", total_time.as_micros(), i64),
                             (
                                 "verify_accounts_lt_hash_us",
-                                lattice_verify_time.as_ref().map(Duration::as_micros),
-                                Option<i64>
-                            ),
-                            ("verify_accounts_hash_us",
-                                merkle_verify_time.as_ref().map(Duration::as_micros),
-                                Option<i64>
+                                lattice_verify_time.as_micros(),
+                                i64
                             ),
                         );
                         info!("Initial background accounts hash verification has stopped");
@@ -4791,51 +4683,30 @@ impl Bank {
             });
             true // initial result is true. We haven't failed yet. If verification fails, we'll panic from bg thread.
         } else {
-            match verify_kind {
-                VerifyKind::Lattice => {
-                    let expected_accounts_lt_hash = self.accounts_lt_hash.lock().unwrap().clone();
-                    let calculated_accounts_lt_hash = if let Some(duplicates_lt_hash) =
-                        duplicates_lt_hash
-                    {
-                        accounts
-                            .accounts_db
-                            .calculate_accounts_lt_hash_at_startup_from_storages(
-                                snapshot_storages.0.as_slice(),
-                                &duplicates_lt_hash,
-                            )
-                    } else {
-                        accounts
-                            .accounts_db
-                            .calculate_accounts_lt_hash_at_startup_from_index(&self.ancestors, slot)
-                    };
-                    let is_ok = calculated_accounts_lt_hash == expected_accounts_lt_hash;
-                    if !is_ok {
-                        let expected = expected_accounts_lt_hash.0.checksum();
-                        let calculated = calculated_accounts_lt_hash.0.checksum();
-                        error!(
-                            "Verifying accounts failed: accounts lattice hashes do not \
-                             match, expected: {expected}, calculated: {calculated}",
-                        );
-                    }
-                    self.set_initial_accounts_hash_verification_completed();
-                    is_ok
-                }
-                VerifyKind::Merkle => {
-                    let snapshot_storages_and_slots = (
+            let expected_accounts_lt_hash = self.accounts_lt_hash.lock().unwrap().clone();
+            let calculated_accounts_lt_hash = if let Some(duplicates_lt_hash) = duplicates_lt_hash {
+                accounts
+                    .accounts_db
+                    .calculate_accounts_lt_hash_at_startup_from_storages(
                         snapshot_storages.0.as_slice(),
-                        snapshot_storages.1.as_slice(),
-                    );
-                    let is_ok = accounts.verify_accounts_hash_and_lamports(
-                        snapshot_storages_and_slots,
-                        slot,
-                        capitalization,
-                        base,
-                        verify_config,
-                    );
-                    self.set_initial_accounts_hash_verification_completed();
-                    is_ok
-                }
+                        &duplicates_lt_hash,
+                    )
+            } else {
+                accounts
+                    .accounts_db
+                    .calculate_accounts_lt_hash_at_startup_from_index(&self.ancestors, slot)
+            };
+            let is_ok = calculated_accounts_lt_hash == expected_accounts_lt_hash;
+            if !is_ok {
+                let expected = expected_accounts_lt_hash.0.checksum();
+                let calculated = calculated_accounts_lt_hash.0.checksum();
+                error!(
+                    "Verifying accounts failed: accounts lattice hashes do not \
+                    match, expected: {expected}, calculated: {calculated}",
+                );
             }
+            self.set_initial_accounts_hash_verification_completed();
+            is_ok
         }
     }
 
@@ -5135,11 +5006,9 @@ impl Bank {
     /// calculation and could shield other real accounts.
     pub fn verify_snapshot_bank(
         &self,
-        _test_hash_calculation: bool,
         skip_shrink: bool,
         force_clean: bool,
         latest_full_snapshot_slot: Slot,
-        base: Option<(Slot, /*capitalization*/ u64)>,
         duplicates_lt_hash: Option<Box<DuplicatesLtHash>>,
     ) -> bool {
         // If we verify the accounts using the lattice-based hash *and* with storages (as opposed
@@ -5154,12 +5023,9 @@ impl Bank {
             if should_verify_accounts {
                 info!("Verifying accounts...");
                 let verified = self.verify_accounts_hash(
-                    base,
                     VerifyAccountsHashConfig {
-                        ignore_mismatch: false,
                         require_rooted_bank: false,
                         run_in_background: true,
-                        store_hash_raw_data_for_debug: false,
                     },
                     duplicates_lt_hash,
                 );

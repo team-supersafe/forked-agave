@@ -343,8 +343,6 @@ pub const ACCOUNTS_DB_CONFIG_FOR_TESTING: AccountsDbConfig = AccountsDbConfig {
     partitioned_epoch_rewards_config: DEFAULT_PARTITIONED_EPOCH_REWARDS_CONFIG,
     storage_access: StorageAccess::File,
     scan_filter_for_shrinking: ScanFilter::OnlyAbnormalTest,
-    enable_experimental_accumulator_hash: false,
-    verify_experimental_accumulator_hash: false,
     snapshots_use_experimental_accumulator_hash: false,
     num_clean_threads: None,
     num_foreground_threads: None,
@@ -369,8 +367,6 @@ pub const ACCOUNTS_DB_CONFIG_FOR_BENCHMARKS: AccountsDbConfig = AccountsDbConfig
     partitioned_epoch_rewards_config: DEFAULT_PARTITIONED_EPOCH_REWARDS_CONFIG,
     storage_access: StorageAccess::File,
     scan_filter_for_shrinking: ScanFilter::OnlyAbnormal,
-    enable_experimental_accumulator_hash: false,
-    verify_experimental_accumulator_hash: false,
     snapshots_use_experimental_accumulator_hash: false,
     num_clean_threads: None,
     num_foreground_threads: None,
@@ -499,8 +495,6 @@ pub struct AccountsDbConfig {
     pub partitioned_epoch_rewards_config: PartitionedEpochRewardsConfig,
     pub storage_access: StorageAccess,
     pub scan_filter_for_shrinking: ScanFilter,
-    pub enable_experimental_accumulator_hash: bool,
-    pub verify_experimental_accumulator_hash: bool,
     pub snapshots_use_experimental_accumulator_hash: bool,
     /// Number of threads for background cleaning operations (`thread_pool_clean')
     pub num_clean_threads: Option<NonZeroUsize>,
@@ -1455,14 +1449,6 @@ pub struct AccountsDb {
     /// Note, this is None if we're told to *not* take snapshots
     latest_full_snapshot_slot: SeqLock<Option<Slot>>,
 
-    /// Flag to indicate if the experimental accounts lattice hash is enabled.
-    /// (For R&D only; a feature-gate also exists to turn this on and make it a part of consensus.)
-    pub is_experimental_accumulator_hash_enabled: AtomicBool,
-
-    /// Flag to indicate if the experimental accounts lattice hash should be verified.
-    /// (For R&D only)
-    pub verify_experimental_accumulator_hash: bool,
-
     /// Flag to indicate if the experimental accounts lattice hash is used for snapshots.
     /// (For R&D only; a feature-gate also exists to turn this on.)
     pub snapshots_use_experimental_accumulator_hash: AtomicBool,
@@ -1874,11 +1860,6 @@ impl AccountsDb {
             exhaustively_verify_refcounts: accounts_db_config.exhaustively_verify_refcounts,
             storage_access: accounts_db_config.storage_access,
             scan_filter_for_shrinking: accounts_db_config.scan_filter_for_shrinking,
-            is_experimental_accumulator_hash_enabled: accounts_db_config
-                .enable_experimental_accumulator_hash
-                .into(),
-            verify_experimental_accumulator_hash: accounts_db_config
-                .verify_experimental_accumulator_hash,
             snapshots_use_experimental_accumulator_hash: accounts_db_config
                 .snapshots_use_experimental_accumulator_hash
                 .into(),
@@ -1956,18 +1937,6 @@ impl AccountsDb {
             size,
             self.accounts_file_provider,
         )
-    }
-
-    /// Returns if the experimental accounts lattice hash is enabled
-    pub fn is_experimental_accumulator_hash_enabled(&self) -> bool {
-        self.is_experimental_accumulator_hash_enabled
-            .load(Ordering::Acquire)
-    }
-
-    /// Sets if the experimental accounts lattice hash is enabled
-    pub fn set_is_experimental_accumulator_hash_enabled(&self, is_enabled: bool) {
-        self.is_experimental_accumulator_hash_enabled
-            .store(is_enabled, Ordering::Release);
     }
 
     /// Returns if snapshots use the experimental accounts lattice hash
@@ -7243,14 +7212,13 @@ impl AccountsDb {
                     store.slot(),
                     *slot
                 );
-                if offsets.len() == store.count() {
+
+                let remaining_accounts = if offsets.len() == store.count() {
                     // all remaining alive accounts in the storage are being removed, so the entire storage/slot is dead
-                    store.remove_accounts(store.alive_bytes(), offsets.len());
-                    self.dirty_stores.insert(*slot, store);
-                    dead_slots.insert(*slot);
+                    store.remove_accounts(store.alive_bytes(), offsets.len())
                 } else {
                     // not all accounts are being removed, so figure out sizes of accounts we are removing and update the alive bytes and alive account count
-                    let (_, us) = measure_us!({
+                    let (remaining_accounts, us) = measure_us!({
                         let mut offsets = offsets.iter().cloned().collect::<Vec<_>>();
                         // sort so offsets are in order. This improves efficiency of loading the accounts.
                         offsets.sort_unstable();
@@ -7259,7 +7227,7 @@ impl AccountsDb {
                             .iter()
                             .map(|len| store.accounts.calculate_stored_size(*len))
                             .sum();
-                        store.remove_accounts(dead_bytes, offsets.len());
+                        let remaining_accounts = store.remove_accounts(dead_bytes, offsets.len());
 
                         if let MarkAccountsObsolete::Yes(slot_marked_obsolete) =
                             mark_accounts_obsolete
@@ -7269,21 +7237,29 @@ impl AccountsDb {
                                 slot_marked_obsolete,
                             );
                         }
-
-                        if Self::is_shrinking_productive(&store)
-                            && self.is_candidate_for_shrink(&store)
-                        {
-                            // Checking that this single storage entry is ready for shrinking,
-                            // should be a sufficient indication that the slot is ready to be shrunk
-                            // because slots should only have one storage entry, namely the one that was
-                            // created by `flush_slot_cache()`.
-                            new_shrink_candidates.insert(*slot);
-                        }
+                        remaining_accounts
                     });
                     self.clean_accounts_stats
                         .get_account_sizes_us
                         .fetch_add(us, Ordering::Relaxed);
-                }
+                    remaining_accounts
+                };
+
+                // Check if we have removed all accounts from the storage
+                // This may be different from the check above as this
+                // can be multithreaded
+                if remaining_accounts == 0 {
+                    self.dirty_stores.insert(*slot, store);
+                    dead_slots.insert(*slot);
+                } else if Self::is_shrinking_productive(&store)
+                    && self.is_candidate_for_shrink(&store)
+                {
+                    // Checking that this single storage entry is ready for shrinking,
+                    // should be a sufficient indication that the slot is ready to be shrunk
+                    // because slots should only have one storage entry, namely the one that was
+                    // created by `flush_slot_cache()`.
+                    new_shrink_candidates.insert(*slot);
+                };
             }
         });
         measure.stop();
@@ -7462,10 +7438,15 @@ impl AccountsDb {
                     .map(|store| {
                         let slot = store.slot();
                         let mut pubkeys = Vec::with_capacity(store.count());
+                        // Obsolete accounts are already unreffed before this point, so do not add
+                        // them to the pubkeys list.
+                        let obsolete_accounts = store.get_obsolete_accounts(None);
                         store
                             .accounts
-                            .scan_pubkeys(|pubkey| {
-                                pubkeys.push((slot, *pubkey));
+                            .scan_accounts_without_data(|offset, account| {
+                                if !obsolete_accounts.contains(&(offset, account.data_len)) {
+                                    pubkeys.push((slot, *account.pubkey));
+                                }
                             })
                             .expect("must scan accounts storage");
                         pubkeys
