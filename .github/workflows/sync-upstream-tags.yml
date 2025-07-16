@@ -1,0 +1,35 @@
+name: Sync Upstream Tags
+
+on:
+  schedule:
+    - cron: '0 * * * *' # every hour
+  workflow_dispatch:
+
+jobs:
+  sync-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/anza-xyz/agave.git
+          git fetch upstream --tags
+
+      - name: Sync new tags
+        run: |
+          for tag in $(git tag -l --remote upstream | sed 's|upstream/||'); do
+            if ! git tag -l | grep -q "^$tag$"; then
+              git fetch upstream tag $tag
+              git tag $tag upstream/$tag
+              git push origin $tag
+            fi
+          done 
