@@ -29,13 +29,23 @@ jobs:
           # Get all tags from upstream
           git fetch upstream --tags
           
+          echo "=== Debug Info ==="
+          echo "Local tags count: $(git tag -l | wc -l)"
+          echo "Upstream tags count: $(git ls-remote --tags upstream | grep -v '\^{}$' | wc -l)"
+          echo "First 5 local tags: $(git tag -l | head -5 | tr '\n' ' ')"
+          echo "First 5 upstream tags: $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | head -5 | tr '\n' ' ')"
+          echo "=================="
+          
           # Get list of tags that exist upstream but not in our fork
           # Filter out peeled tags (^{} suffix) and get unique tag names
           for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | sort -u); do
+            echo "Checking tag: $tag"
             if ! git tag -l | grep -q "^$tag$"; then
               echo "Syncing tag: $tag"
               git fetch upstream tag $tag
               git tag $tag upstream/$tag
               git push origin $tag
+            else
+              echo "Tag $tag already exists locally"
             fi
           done
