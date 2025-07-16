@@ -30,7 +30,8 @@ jobs:
           git fetch upstream --tags
           
           # Get list of tags that exist upstream but not in our fork
-          for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||'); do
+          # Filter out peeled tags (^{} suffix) and get unique tag names
+          for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | sort -u); do
             if ! git tag -l | grep -q "^$tag$"; then
               echo "Syncing tag: $tag"
               git fetch upstream tag $tag
