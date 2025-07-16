@@ -26,10 +26,15 @@ jobs:
 
       - name: Sync new tags
         run: |
-          for tag in $(git tag -l --remote upstream | sed 's|upstream/||'); do
+          # Get all tags from upstream
+          git fetch upstream --tags
+          
+          # Get list of tags that exist upstream but not in our fork
+          for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||'); do
             if ! git tag -l | grep -q "^$tag$"; then
+              echo "Syncing tag: $tag"
               git fetch upstream tag $tag
               git tag $tag upstream/$tag
               git push origin $tag
             fi
-          done 
+          done
