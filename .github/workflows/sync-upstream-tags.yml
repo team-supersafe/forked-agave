@@ -1,4 +1,4 @@
-name: Sync Upstream Tags
+name: Sync Tags and Create Releases
 
 on:
   schedule:
@@ -45,11 +45,31 @@ jobs:
               git fetch upstream tag $tag
               git tag $tag upstream/$tag
               git push origin $tag
-              
-              # Create GitHub Release for the new tag
+            else
+              echo "Tag $tag already exists locally"
+            fi
+          done
+
+  create-releases:
+    runs-on: ubuntu-latest
+    needs: sync-tags
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create missing releases
+        run: |
+          echo "=== Creating Releases for v2.2+ Tags ==="
+          
+          # Get all v2.2+ tags from upstream
+          for tag in $(git ls-remote --tags https://github.com/anza-xyz/agave.git | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
+            echo "Checking release for tag: $tag"
+            if ! gh release view "$tag" --repo team-supersafe/forked-agave >/dev/null 2>&1; then
               echo "Creating release for tag: $tag"
               gh release create "$tag" --title "Release $tag" --notes "Mirrored from upstream anza-xyz/agave" --repo team-supersafe/forked-agave
             else
-              echo "Tag $tag already exists locally"
+              echo "Release for tag $tag already exists"
             fi
           done
