@@ -28,25 +28,14 @@ jobs:
         run: |
           # Get all tags from upstream
           git fetch upstream --tags
-          
-          echo "=== Debug Info ==="
-          echo "Local tags count: $(git tag -l | wc -l)"
-          echo "Upstream tags count: $(git ls-remote --tags upstream | grep -v '\^{}$' | wc -l)"
-          echo "Filtered tags (>=v2.2.0) count: $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | wc -l)"
-          echo "First 5 filtered tags: $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | head -5 | tr '\n' ' ')"
-          echo "=================="
-          
           # Get list of tags that exist upstream but not in our fork
           # Filter out peeled tags (^{} suffix), get unique tag names, and only v2.2+ tags
           for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
-            echo "Checking tag: $tag"
             if ! git tag -l | grep -q "^$tag$"; then
               echo "Syncing tag: $tag"
               git fetch upstream tag $tag
               git tag $tag upstream/$tag
               git push origin $tag
-            else
-              echo "Tag $tag already exists locally"
             fi
           done
 
@@ -63,15 +52,10 @@ jobs:
 
       - name: Create missing releases
         run: |
-          echo "=== Creating Releases for v2.2+ Tags ==="
-          
           # Get all v2.2+ tags from upstream
           for tag in $(git ls-remote --tags https://github.com/anza-xyz/agave.git | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
-            echo "Checking release for tag: $tag"
             if ! gh release view "$tag" --repo team-supersafe/forked-agave >/dev/null 2>&1; then
               echo "Creating release for tag: $tag"
               gh release create "$tag" --title "Release $tag" --notes "Mirrored from upstream anza-xyz/agave" --repo team-supersafe/forked-agave
-            else
-              echo "Release for tag $tag already exists"
             fi
           done
