@@ -23,13 +23,6 @@ jobs:
         run: |
           git remote add upstream https://github.com/anza-xyz/agave.git
 
-      - name: Sync upstream main branch
-        run: |
-          git fetch upstream
-          git checkout main
-          git merge upstream/main
-          git push origin main
-
       - name: Sync new tags
         run: |
           # Get all tags from upstream
