@@ -26,6 +26,7 @@ jobs:
       - name: Add upstream remote
         run: |
           git remote add upstream https://github.com/anza-xyz/agave.git
+          git remote set-url origin https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/team-supersafe/forked-agave.git
 
       - name: Sync new tags
         run: |
