@@ -31,7 +31,6 @@ jobs:
             if ! git tag -l | grep -q "^$tag$"; then
               echo "Syncing tag: $tag"
               git fetch upstream tag $tag
-              git tag $tag upstream/$tag
               git push origin $tag
             fi
           done
