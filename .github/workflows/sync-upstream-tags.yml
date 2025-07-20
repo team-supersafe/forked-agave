@@ -5,6 +5,9 @@ on:
   #   - cron: '0 * * * *' # every hour
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   sync-tags:
     runs-on: ubuntu-latest
@@ -35,8 +38,23 @@ jobs:
           for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
             if ! git tag -l | grep -q "^$tag$"; then
               echo "Syncing tag: $tag"
+              # Fetch the specific tag from upstream
               git fetch upstream tag $tag
-              git push origin $tag
+              # Get the commit hash for this tag
+              commit_hash=$(git rev-parse FETCH_HEAD)
+              # Check if this commit contains workflow files that might cause permission issues
+              if git show --name-only "$commit_hash" | grep -q "^\.github/workflows/"; then
+                echo "Warning: Skipping tag $tag as it contains workflow files that require special permissions"
+                continue
+              fi
+              # Create a lightweight tag pointing to the fetched commit
+              git tag -f "$tag" "$commit_hash"
+              # Try to push the tag
+              if ! git push origin "$tag" --force; then
+                echo "Warning: Failed to push tag $tag"
+              else
+                echo "Successfully synced tag: $tag"
+              fi
             fi
           done
 
