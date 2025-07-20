@@ -4,7 +4,6 @@ use {
         serde_snapshot::BankIncrementalSnapshotPersistence,
         snapshot_hash::SnapshotHash,
     },
-    agave_feature_set as feature_set,
     log::*,
     solana_accounts_db::{
         accounts::Accounts,
@@ -72,17 +71,7 @@ impl AccountsPackage {
         let snapshot_info = {
             let accounts_db = &bank.rc.accounts.accounts_db;
             let write_version = accounts_db.write_version.load(Ordering::Acquire);
-            let accounts_delta_hash = if bank
-                .feature_set
-                .is_active(&feature_set::remove_accounts_delta_hash::id())
-            {
-                AccountsDeltaHash(Hash::default())
-            } else {
-                // SAFETY: There *must* be an accounts delta hash for this slot.
-                // Since we only snapshot rooted slots, and we know rooted slots must be frozen,
-                // that guarantees this slot will have an accounts delta hash.
-                accounts_db.get_accounts_delta_hash(slot).unwrap()
-            };
+            let accounts_delta_hash = AccountsDeltaHash(Hash::default());
             let bank_hash_stats = bank.get_bank_hash_stats();
             let bank_fields_to_serialize = bank.get_fields_to_serialize();
             SupplementalSnapshotInfo {
@@ -94,11 +83,7 @@ impl AccountsPackage {
             }
         };
 
-        let accounts_hash_algorithm = if bank.is_snapshots_lt_hash_enabled() {
-            AccountsHashAlgorithm::Lattice
-        } else {
-            AccountsHashAlgorithm::Merkle
-        };
+        let accounts_hash_algorithm = AccountsHashAlgorithm::Lattice;
         Self::_new(
             package_kind,
             bank,
@@ -175,7 +160,7 @@ pub struct SupplementalSnapshotInfo {
     pub status_cache_slot_deltas: Vec<BankSlotDelta>,
     pub bank_fields_to_serialize: BankFieldsToSerialize,
     pub bank_hash_stats: BankHashStats,
-    pub accounts_delta_hash: AccountsDeltaHash,
+    pub accounts_delta_hash: AccountsDeltaHash, // obsolete, will be removed next
     pub write_version: u64,
 }
 
@@ -197,7 +182,7 @@ pub struct SnapshotPackage {
     pub status_cache_slot_deltas: Vec<BankSlotDelta>,
     pub bank_fields_to_serialize: BankFieldsToSerialize,
     pub bank_hash_stats: BankHashStats,
-    pub accounts_delta_hash: AccountsDeltaHash,
+    pub accounts_delta_hash: AccountsDeltaHash, // obsolete, will be removed next
     pub accounts_hash: AccountsHash,
     pub write_version: u64,
     pub bank_incremental_snapshot_persistence: Option<BankIncrementalSnapshotPersistence>,
@@ -248,11 +233,13 @@ impl SnapshotPackage {
             block_height: accounts_package.block_height,
             hash: SnapshotHash::new(
                 &merkle_or_lattice_accounts_hash,
-                snapshot_info
-                    .bank_fields_to_serialize
-                    .accounts_lt_hash
-                    .as_ref()
-                    .map(|accounts_lt_hash| accounts_lt_hash.0.checksum()),
+                Some(
+                    snapshot_info
+                        .bank_fields_to_serialize
+                        .accounts_lt_hash
+                        .0
+                        .checksum(),
+                ),
             ),
             snapshot_storages: accounts_package.snapshot_storages,
             status_cache_slot_deltas: snapshot_info.status_cache_slot_deltas,

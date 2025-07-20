@@ -702,7 +702,7 @@ impl Serialize for SerializableBankAndStorage<'_> {
         let write_version = accounts_db.write_version.load(Ordering::Acquire);
         let lamports_per_signature = bank_fields.fee_rate_governor.lamports_per_signature;
         let versioned_epoch_stakes = std::mem::take(&mut bank_fields.versioned_epoch_stakes);
-        let accounts_lt_hash = bank_fields.accounts_lt_hash.clone().map(Into::into);
+        let accounts_lt_hash = Some(bank_fields.accounts_lt_hash.clone().into());
         let bank_fields_to_serialize = (
             SerializableVersionedBank::from(bank_fields),
             SerializableAccountsDb::<'_> {
@@ -777,7 +777,7 @@ struct SerializableAccountsDb<'a> {
     slot: Slot,
     account_storage_entries: &'a [Vec<Arc<AccountStorageEntry>>],
     bank_hash_stats: BankHashStats,
-    accounts_delta_hash: AccountsDeltaHash,
+    accounts_delta_hash: AccountsDeltaHash, // obsolete, will be removed next
     accounts_hash: AccountsHash,
     write_version: u64,
 }

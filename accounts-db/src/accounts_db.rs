@@ -74,7 +74,6 @@ use {
         u64_align, utils,
         verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
     },
-    crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError},
     dashmap::{DashMap, DashSet},
     log::*,
     rand::{thread_rng, Rng},
@@ -105,7 +104,7 @@ use {
             atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
             Arc, Condvar, Mutex, RwLock,
         },
-        thread::{sleep, Builder},
+        thread::sleep,
         time::{Duration, Instant},
     },
     tempfile::TempDir,
@@ -343,7 +342,6 @@ pub const ACCOUNTS_DB_CONFIG_FOR_TESTING: AccountsDbConfig = AccountsDbConfig {
     partitioned_epoch_rewards_config: DEFAULT_PARTITIONED_EPOCH_REWARDS_CONFIG,
     storage_access: StorageAccess::File,
     scan_filter_for_shrinking: ScanFilter::OnlyAbnormalTest,
-    snapshots_use_experimental_accumulator_hash: false,
     num_clean_threads: None,
     num_foreground_threads: None,
     num_hash_threads: None,
@@ -367,7 +365,6 @@ pub const ACCOUNTS_DB_CONFIG_FOR_BENCHMARKS: AccountsDbConfig = AccountsDbConfig
     partitioned_epoch_rewards_config: DEFAULT_PARTITIONED_EPOCH_REWARDS_CONFIG,
     storage_access: StorageAccess::File,
     scan_filter_for_shrinking: ScanFilter::OnlyAbnormal,
-    snapshots_use_experimental_accumulator_hash: false,
     num_clean_threads: None,
     num_foreground_threads: None,
     num_hash_threads: None,
@@ -495,7 +492,6 @@ pub struct AccountsDbConfig {
     pub partitioned_epoch_rewards_config: PartitionedEpochRewardsConfig,
     pub storage_access: StorageAccess,
     pub scan_filter_for_shrinking: ScanFilter,
-    pub snapshots_use_experimental_accumulator_hash: bool,
     /// Number of threads for background cleaning operations (`thread_pool_clean')
     pub num_clean_threads: Option<NonZeroUsize>,
     /// Number of threads for foreground operations (`thread_pool`)
@@ -1332,7 +1328,6 @@ pub struct AccountsDb {
 
     write_cache_limit_bytes: Option<u64>,
 
-    sender_bg_hasher: RwLock<Option<Sender<Vec<Arc<CachedAccount>>>>>,
     read_only_accounts_cache: ReadOnlyAccountsCache,
 
     /// distribute the accounts across storage lists
@@ -1448,10 +1443,6 @@ pub struct AccountsDb {
     /// The latest full snapshot slot dictates how to handle zero lamport accounts
     /// Note, this is None if we're told to *not* take snapshots
     latest_full_snapshot_slot: SeqLock<Option<Slot>>,
-
-    /// Flag to indicate if the experimental accounts lattice hash is used for snapshots.
-    /// (For R&D only; a feature-gate also exists to turn this on.)
-    pub snapshots_use_experimental_accumulator_hash: AtomicBool,
 
     /// These are the ancient storages that could be valuable to
     /// shrink, sorted by amount of dead bytes.  The elements
@@ -1860,9 +1851,6 @@ impl AccountsDb {
             exhaustively_verify_refcounts: accounts_db_config.exhaustively_verify_refcounts,
             storage_access: accounts_db_config.storage_access,
             scan_filter_for_shrinking: accounts_db_config.scan_filter_for_shrinking,
-            snapshots_use_experimental_accumulator_hash: accounts_db_config
-                .snapshots_use_experimental_accumulator_hash
-                .into(),
             thread_pool,
             thread_pool_clean,
             thread_pool_hash,
@@ -1870,7 +1858,6 @@ impl AccountsDb {
             active_stats: ActiveStats::default(),
             storage: AccountStorage::default(),
             accounts_cache: AccountsCache::default(),
-            sender_bg_hasher: RwLock::new(None),
             uncleaned_pubkeys: DashMap::default(),
             next_id: AtomicAccountsFileId::new(0),
             shrink_candidate_slots: Mutex::new(ShrinkCandidates::default()),
@@ -1937,18 +1924,6 @@ impl AccountsDb {
             size,
             self.accounts_file_provider,
         )
-    }
-
-    /// Returns if snapshots use the experimental accounts lattice hash
-    pub fn snapshots_use_experimental_accumulator_hash(&self) -> bool {
-        self.snapshots_use_experimental_accumulator_hash
-            .load(Ordering::Acquire)
-    }
-
-    /// Sets if snapshots use the experimental accounts lattice hash
-    pub fn set_snapshots_use_experimental_accumulator_hash(&self, is_enabled: bool) {
-        self.snapshots_use_experimental_accumulator_hash
-            .store(is_enabled, Ordering::Release);
     }
 
     /// While scanning cleaning candidates obtain slots that can be
@@ -2118,55 +2093,6 @@ impl AccountsDb {
                 }
             }
         }
-    }
-
-    fn background_hasher(receiver: Receiver<Vec<Arc<CachedAccount>>>) {
-        info!("Background account hasher has started");
-        loop {
-            let result = receiver.try_recv();
-            match result {
-                Ok(accounts) => {
-                    for account in accounts {
-                        // if we hold the only ref, then this account doesn't need to be hashed, we ignore this account and it will disappear
-                        if Arc::strong_count(&account) > 1 {
-                            // this will cause the hash to be calculated and store inside account if it needs to be calculated
-                            let _ = (*account).hash();
-                        };
-                    }
-                }
-                Err(TryRecvError::Empty) => {
-                    sleep(Duration::from_millis(5));
-                }
-                Err(err @ TryRecvError::Disconnected) => {
-                    info!("Background account hasher is stopping because: {err}");
-                    break;
-                }
-            }
-        }
-        info!("Background account hasher has stopped");
-    }
-
-    pub fn start_background_hasher(&self) {
-        if self.is_background_hasher_running() {
-            return;
-        }
-
-        let (sender, receiver) = unbounded();
-        Builder::new()
-            .name("solDbStoreHashr".to_string())
-            .spawn(move || {
-                Self::background_hasher(receiver);
-            })
-            .unwrap();
-        *self.sender_bg_hasher.write().unwrap() = Some(sender);
-    }
-
-    pub fn stop_background_hasher(&self) {
-        drop(self.sender_bg_hasher.write().unwrap().take())
-    }
-
-    pub fn is_background_hasher_running(&self) -> bool {
-        self.sender_bg_hasher.read().unwrap().is_some()
     }
 
     #[must_use]
@@ -5936,14 +5862,13 @@ impl AccountsDb {
             0
         };
 
-        let (account_infos, cached_accounts) = (0..accounts_and_meta_to_store.len())
+        (0..accounts_and_meta_to_store.len())
             .map(|index| {
                 let txn = txs.map(|txs| *txs.get(index).expect("txs must be present if provided"));
-                let mut account_info = AccountInfo::default();
                 accounts_and_meta_to_store.account_default_if_zero_lamport(index, |account| {
                     let account_shared_data = account.to_account_shared_data();
                     let pubkey = account.pubkey();
-                    account_info =
+                    let account_info =
                         AccountInfo::new(StorageLocation::Cached, account.is_zero_lamport());
 
                     self.notify_account_at_accounts_update(
@@ -5955,19 +5880,11 @@ impl AccountsDb {
                     );
                     current_write_version = current_write_version.saturating_add(1);
 
-                    let cached_account =
-                        self.accounts_cache.store(slot, pubkey, account_shared_data);
-                    (account_info, cached_account)
+                    self.accounts_cache.store(slot, pubkey, account_shared_data);
+                    account_info
                 })
             })
-            .unzip();
-
-        // hash this accounts in bg
-        if let Some(sender) = self.sender_bg_hasher.read().unwrap().as_ref() {
-            let _ = sender.send(cached_accounts);
-        };
-
-        account_infos
+            .collect()
     }
 
     fn report_store_stats(&self) {

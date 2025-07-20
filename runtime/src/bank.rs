@@ -480,8 +480,7 @@ pub struct BankFieldsToSerialize {
     pub is_delta: bool,
     pub accounts_data_len: u64,
     pub versioned_epoch_stakes: HashMap<u64, VersionedEpochStakes>,
-    // When removing the accounts lt hash featurization code, also remove this Option wrapper
-    pub accounts_lt_hash: Option<AccountsLtHash>,
+    pub accounts_lt_hash: AccountsLtHash,
 }
 
 // Can't derive PartialEq because RwLock doesn't implement PartialEq
@@ -596,8 +595,7 @@ impl PartialEq for Bank {
             // different Mutexes.
             && (Arc::ptr_eq(hash_overrides, &other.hash_overrides) ||
                 *hash_overrides.lock().unwrap() == *other.hash_overrides.lock().unwrap())
-            && !(self.is_accounts_lt_hash_enabled() && other.is_accounts_lt_hash_enabled()
-                && *accounts_lt_hash.lock().unwrap() != *other.accounts_lt_hash.lock().unwrap())
+            && *accounts_lt_hash.lock().unwrap() == *other.accounts_lt_hash.lock().unwrap()
             && *block_id.read().unwrap() == *other.block_id.read().unwrap()
     }
 }
@@ -637,7 +635,7 @@ impl BankFieldsToSerialize {
             is_delta: bool::default(),
             accounts_data_len: u64::default(),
             versioned_epoch_stakes: HashMap::default(),
-            accounts_lt_hash: Some(AccountsLtHash(LtHash([0x7E57; LtHash::NUM_ELEMENTS]))),
+            accounts_lt_hash: AccountsLtHash(LtHash([0x7E57; LtHash::NUM_ELEMENTS])),
         }
     }
 }
@@ -1405,29 +1403,25 @@ impl Bank {
             .transaction_processor
             .fill_missing_sysvar_cache_entries(&new));
 
-        let (num_accounts_modified_this_slot, populate_cache_for_accounts_lt_hash_us) = new
-            .is_accounts_lt_hash_enabled()
-            .then(|| {
-                measure_us!({
-                    // The cache for accounts lt hash needs to be made aware of accounts modified
-                    // before transaction processing begins.  Otherwise we may calculate the wrong
-                    // accounts lt hash due to having the wrong initial state of the account.  The
-                    // lt hash cache's initial state must always be from an ancestor, and cannot be
-                    // an intermediate state within this Bank's slot.  If the lt hash cache has the
-                    // wrong initial account state, we'll mix out the wrong lt hash value, and thus
-                    // have the wrong overall accounts lt hash, and diverge.
-                    let accounts_modified_this_slot =
-                        new.rc.accounts.accounts_db.get_pubkeys_for_slot(slot);
-                    let num_accounts_modified_this_slot = accounts_modified_this_slot.len();
-                    for pubkey in accounts_modified_this_slot {
-                        new.cache_for_accounts_lt_hash
-                            .entry(pubkey)
-                            .or_insert(AccountsLtHashCacheValue::BankNew);
-                    }
-                    num_accounts_modified_this_slot
-                })
-            })
-            .unzip();
+        let (num_accounts_modified_this_slot, populate_cache_for_accounts_lt_hash_us) =
+            measure_us!({
+                // The cache for accounts lt hash needs to be made aware of accounts modified
+                // before transaction processing begins.  Otherwise we may calculate the wrong
+                // accounts lt hash due to having the wrong initial state of the account.  The
+                // lt hash cache's initial state must always be from an ancestor, and cannot be
+                // an intermediate state within this Bank's slot.  If the lt hash cache has the
+                // wrong initial account state, we'll mix out the wrong lt hash value, and thus
+                // have the wrong overall accounts lt hash, and diverge.
+                let accounts_modified_this_slot =
+                    new.rc.accounts.accounts_db.get_pubkeys_for_slot(slot);
+                let num_accounts_modified_this_slot = accounts_modified_this_slot.len();
+                for pubkey in accounts_modified_this_slot {
+                    new.cache_for_accounts_lt_hash
+                        .entry(pubkey)
+                        .or_insert(AccountsLtHashCacheValue::BankNew);
+                }
+                num_accounts_modified_this_slot
+            });
 
         time.stop();
         report_new_bank_metrics(
@@ -1926,9 +1920,7 @@ impl Bank {
             is_delta: self.is_delta.load(Relaxed),
             accounts_data_len: self.load_accounts_data_size(),
             versioned_epoch_stakes: self.epoch_stakes.clone(),
-            accounts_lt_hash: self
-                .is_accounts_lt_hash_enabled()
-                .then(|| self.accounts_lt_hash.lock().unwrap().clone()),
+            accounts_lt_hash: self.accounts_lt_hash.lock().unwrap().clone(),
         }
     }
 
@@ -2488,29 +2480,8 @@ impl Bank {
     /// Note that the account state is *not* allowed to change by rehashing.
     /// If modifying accounts in ledger-tool is needed, create a new bank.
     pub fn rehash(&self) {
-        let get_delta_hash = || {
-            (!self
-                .feature_set
-                .is_active(&feature_set::remove_accounts_delta_hash::id()))
-            .then(|| {
-                self.rc
-                    .accounts
-                    .accounts_db
-                    .get_accounts_delta_hash(self.slot())
-            })
-            .flatten()
-        };
-
         let mut hash = self.hash.write().unwrap();
-        let curr_accounts_delta_hash = get_delta_hash();
         let new = self.hash_internal_state();
-        if let Some(curr_accounts_delta_hash) = curr_accounts_delta_hash {
-            let new_accounts_delta_hash = get_delta_hash().unwrap();
-            assert_eq!(
-                new_accounts_delta_hash, curr_accounts_delta_hash,
-                "rehashing is not allowed to change the account state",
-            );
-        }
         if new != *hash {
             warn!("Updating bank hash to {new}");
             *hash = new;
@@ -2538,11 +2509,9 @@ impl Bank {
 
             // freeze is a one-way trip, idempotent
             self.freeze_started.store(true, Relaxed);
-            if self.is_accounts_lt_hash_enabled() {
-                // updating the accounts lt hash must happen *outside* of hash_internal_state() so
-                // that rehash() can be called and *not* modify self.accounts_lt_hash.
-                self.update_accounts_lt_hash();
-            }
+            // updating the accounts lt hash must happen *outside* of hash_internal_state() so
+            // that rehash() can be called and *not* modify self.accounts_lt_hash.
+            self.update_accounts_lt_hash();
             *hash = self.hash_internal_state();
             self.rc.accounts.accounts_db.mark_slot_frozen(self.slot());
         }
@@ -4097,14 +4066,6 @@ impl Bank {
             );
         }
 
-        // If the accounts delta hash is still in use, start the background account hasher
-        if !self
-            .feature_set
-            .is_active(&feature_set::remove_accounts_delta_hash::id())
-        {
-            self.rc.accounts.accounts_db.start_background_hasher();
-        }
-
         if !debug_do_not_add_builtins {
             for builtin in BUILTINS
                 .iter()
@@ -4475,32 +4436,11 @@ impl Bank {
         let measure_total = Measure::start("");
         let slot = self.slot();
 
-        let delta_hash_info = (!self
-            .feature_set
-            .is_active(&feature_set::remove_accounts_delta_hash::id()))
-        .then(|| {
-            measure_us!({
-                self.rc
-                    .accounts
-                    .accounts_db
-                    .calculate_accounts_delta_hash_internal(slot, None)
-            })
-        });
-
-        let mut hash = if let Some((accounts_delta_hash, _measure)) = delta_hash_info.as_ref() {
-            hashv(&[
-                self.parent_hash.as_ref(),
-                accounts_delta_hash.0.as_ref(),
-                &self.signature_count().to_le_bytes(),
-                self.last_blockhash().as_ref(),
-            ])
-        } else {
-            hashv(&[
-                self.parent_hash.as_ref(),
-                &self.signature_count().to_le_bytes(),
-                self.last_blockhash().as_ref(),
-            ])
-        };
+        let mut hash = hashv(&[
+            self.parent_hash.as_ref(),
+            &self.signature_count().to_le_bytes(),
+            self.last_blockhash().as_ref(),
+        ]);
 
         let accounts_lt_hash_checksum = {
             let accounts_lt_hash = &*self.accounts_lt_hash.lock().unwrap();
@@ -4547,22 +4487,18 @@ impl Bank {
 
         let total_us = measure_total.end_as_us();
 
-        let (accounts_delta_hash_us, accounts_delta_hash_log) = delta_hash_info
-            .map(|(hash, us)| (us, format!(" accounts_delta: {}", hash.0)))
-            .unzip();
         datapoint_info!(
             "bank-hash_internal_state",
             ("slot", slot, i64),
             ("total_us", total_us, i64),
-            ("accounts_delta_hash_us", accounts_delta_hash_us, Option<i64>),
         );
         info!(
-            "bank frozen: {slot} hash: {hash}{} signature_count: {} last_blockhash: {} capitalization: {}, accounts_lt_hash checksum: {}, stats: {bank_hash_stats:?}",
-            accounts_delta_hash_log.unwrap_or_default(),
+            "bank frozen: {slot} hash: {hash} signature_count: {} last_blockhash: {} \
+             capitalization: {}, accounts_lt_hash checksum: {accounts_lt_hash_checksum}, \
+             stats: {bank_hash_stats:?}",
             self.signature_count(),
             self.last_blockhash(),
             self.capitalization(),
-            accounts_lt_hash_checksum,
         );
         hash
     }
@@ -4872,48 +4808,7 @@ impl Bank {
     /// Returns the `SnapshotHash` for this bank's slot
     ///
     /// This fn is used at startup to verify the bank was rebuilt correctly.
-    ///
-    /// # Panics
-    ///
-    /// If the snapshots lt hash feature is not enabled, panics if there is both-or-neither of an
-    /// `AccountsHash` and an `IncrementalAccountsHash` for this bank's slot.  There may only be
-    /// one or the other.
     pub fn get_snapshot_hash(&self) -> SnapshotHash {
-        if self.is_snapshots_lt_hash_enabled() {
-            self.get_lattice_snapshot_hash()
-        } else {
-            self.get_merkle_snapshot_hash()
-        }
-    }
-
-    /// Returns the merkle-based `SnapshotHash` for this bank's slot
-    ///
-    /// This fn is used at startup to verify the bank was rebuilt correctly.
-    ///
-    /// # Panics
-    ///
-    /// If the snapshots lt hash feature is not enabled, panics if there is both-or-neither of an
-    /// `AccountsHash` and an `IncrementalAccountsHash` for this bank's slot.  There may only be
-    /// one or the other.
-    pub fn get_merkle_snapshot_hash(&self) -> SnapshotHash {
-        let accounts_hash = self.get_accounts_hash();
-        let incremental_accounts_hash = self.get_incremental_accounts_hash();
-        let accounts_hash_kind = match (accounts_hash, incremental_accounts_hash) {
-            (Some(_), Some(_)) => panic!("Both full and incremental accounts hashes are present for slot {}; it is ambiguous which one to use for the snapshot hash!", self.slot()),
-            (Some(accounts_hash), None) => accounts_hash.into(),
-            (None, Some(incremental_accounts_hash)) => incremental_accounts_hash.into(),
-            (None, None) => panic!("accounts hash is required to get snapshot hash"),
-        };
-        SnapshotHash::new(
-            &MerkleOrLatticeAccountsHash::Merkle(accounts_hash_kind),
-            None,
-        )
-    }
-
-    /// Returns the lattice-based `SnapshotHash` for this bank's slot
-    ///
-    /// This fn is used at startup to verify the bank was rebuilt correctly.
-    pub fn get_lattice_snapshot_hash(&self) -> SnapshotHash {
         SnapshotHash::new(
             &MerkleOrLatticeAccountsHash::Lattice,
             Some(self.accounts_lt_hash.lock().unwrap().0.checksum()),
@@ -5535,12 +5430,6 @@ impl Bank {
                 vote_cost_limit,
             );
         }
-
-        if new_feature_activations.contains(&feature_set::remove_accounts_delta_hash::id()) {
-            // If the accounts delta hash has been removed, then we no longer need to compute the
-            // AccountHash for modified accounts, and can stop the background account hasher.
-            self.rc.accounts.accounts_db.stop_background_hasher();
-        }
     }
 
     fn adjust_sysvar_balance_for_rent(&self, account: &mut AccountSharedData) {
@@ -5897,9 +5786,7 @@ impl TransactionProcessingCallback for Bank {
     }
 
     fn inspect_account(&self, address: &Pubkey, account_state: AccountState, is_writable: bool) {
-        if self.is_accounts_lt_hash_enabled() {
-            self.inspect_account_for_accounts_lt_hash(address, &account_state, is_writable);
-        }
+        self.inspect_account_for_accounts_lt_hash(address, &account_state, is_writable);
     }
 }
 

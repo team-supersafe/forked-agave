@@ -138,12 +138,12 @@ mod tests {
         {
             let mut bank_fields = bank2.get_fields_to_serialize();
             let versioned_epoch_stakes = mem::take(&mut bank_fields.versioned_epoch_stakes);
-            let accounts_lt_hash = bank_fields.accounts_lt_hash.clone().map(Into::into);
+            let accounts_lt_hash = Some(bank_fields.accounts_lt_hash.clone().into());
             serde_snapshot::serialize_bank_snapshot_into(
                 &mut writer,
                 bank_fields,
                 bank2.get_bank_hash_stats(),
-                accounts_db.get_accounts_delta_hash(bank2_slot).unwrap(),
+                AccountsDeltaHash(Hash::default()), // obsolete, will be removed next
                 expected_accounts_hash,
                 &get_storages_to_serialize(&bank2.get_snapshot_storages(None)),
                 ExtraFieldsToSerialize {
