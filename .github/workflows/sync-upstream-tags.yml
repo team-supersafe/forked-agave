@@ -1,8 +1,8 @@
 name: Sync Tags and Create Releases
 
 on:
-  schedule:
-    - cron: '0 * * * *' # every hour
+  # schedule:
+  #   - cron: '0 * * * *' # every hour
   workflow_dispatch:
 
 jobs:
@@ -25,8 +25,6 @@ jobs:
 
       - name: Sync new tags
         run: |
-          # Get all tags from upstream
-          git fetch upstream --tags
           # Get list of tags that exist upstream but not in our fork
           # Filter out peeled tags (^{} suffix), get unique tag names, and only v2.2+ tags
           for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
