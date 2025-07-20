@@ -1,8 +1,8 @@
 name: Sync Tags and Create Releases
 
 on:
-  # schedule:
-  #   - cron: '0 * * * *' # every hour
+  schedule:
+    - cron: '0 * * * *' # every hour
   workflow_dispatch:
 
 permissions:
