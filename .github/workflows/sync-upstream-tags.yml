@@ -29,8 +29,8 @@ jobs:
 
       - name: Sync tags from upstream
         run: |
-          # Fetch all tags from upstream
-          git fetch upstream --tags
+          # Fetch all tags from upstream (ignore errors for rejected tags)
+          git fetch upstream --tags || true
           
           # Get list of tags that match our pattern
           for tag in $(git tag -l | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
