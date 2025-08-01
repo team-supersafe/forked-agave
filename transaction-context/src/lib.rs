@@ -60,10 +60,6 @@ pub type IndexOfAccount = u16;
 pub struct InstructionAccount {
     /// Points to the account and its key in the `TransactionContext`
     pub index_in_transaction: IndexOfAccount,
-    /// Points to the first occurrence in the parent `InstructionContext`
-    ///
-    /// This excludes the program accounts.
-    pub index_in_caller: IndexOfAccount,
     /// Points to the first occurrence in the current `InstructionContext`
     ///
     /// This excludes the program accounts.
@@ -77,14 +73,12 @@ pub struct InstructionAccount {
 impl InstructionAccount {
     pub fn new(
         index_in_transaction: IndexOfAccount,
-        index_in_caller: IndexOfAccount,
         index_in_callee: IndexOfAccount,
         is_signer: bool,
         is_writable: bool,
     ) -> InstructionAccount {
         InstructionAccount {
             index_in_transaction,
-            index_in_caller,
             index_in_callee,
             is_signer: is_signer as u8,
             is_writable: is_writable as u8,
@@ -366,14 +360,23 @@ impl TransactionContext {
         self.get_instruction_context_at_nesting_level(level)
     }
 
-    /// Returns the InstructionContext to configure for the next invocation.
+    /// Returns the mutable InstructionContext to configure for the next invocation.
     ///
     /// The last InstructionContext is always empty and pre-reserved for the next instruction.
-    pub fn get_next_instruction_context(
+    pub fn get_next_instruction_context_mut(
         &mut self,
     ) -> Result<&mut InstructionContext, InstructionError> {
         self.instruction_trace
             .last_mut()
+            .ok_or(InstructionError::CallDepth)
+    }
+
+    /// Returns the immutable InstructionContext. This function assumes it has already been
+    /// configured with the correct values in `prepare_next_instruction` or
+    /// `prepare_next_top_level_instruction`
+    pub fn get_next_instruction_context(&self) -> Result<&InstructionContext, InstructionError> {
+        self.instruction_trace
+            .last()
             .ok_or(InstructionError::CallDepth)
     }
 
@@ -400,7 +403,7 @@ impl TransactionContext {
             }
         }
         {
-            let instruction_context = self.get_next_instruction_context()?;
+            let instruction_context = self.get_next_instruction_context_mut()?;
             instruction_context.nesting_level = nesting_level;
             instruction_context.instruction_accounts_lamport_sum =
                 callee_instruction_accounts_lamport_sum;
@@ -627,12 +630,12 @@ impl InstructionContext {
     #[cfg(not(target_os = "solana"))]
     pub fn configure(
         &mut self,
-        program_accounts: &[IndexOfAccount],
-        instruction_accounts: &[InstructionAccount],
+        program_accounts: Vec<IndexOfAccount>,
+        instruction_accounts: Vec<InstructionAccount>,
         instruction_data: &[u8],
     ) {
-        self.program_accounts = program_accounts.to_vec();
-        self.instruction_accounts = instruction_accounts.to_vec();
+        self.program_accounts = program_accounts;
+        self.instruction_accounts = instruction_accounts;
         self.instruction_data = instruction_data.to_vec();
     }
 
@@ -727,6 +730,18 @@ impl InstructionContext {
             .index_in_transaction as IndexOfAccount)
     }
 
+    /// Get the index of account in instruction from the index in transaction
+    pub fn get_index_of_account_in_instruction(
+        &self,
+        index_in_transaction: IndexOfAccount,
+    ) -> Result<IndexOfAccount, InstructionError> {
+        self.instruction_accounts
+            .iter()
+            .position(|account| account.index_in_transaction == index_in_transaction)
+            .map(|idx| idx as IndexOfAccount)
+            .ok_or(InstructionError::MissingAccount)
+    }
+
     /// Returns `Some(instruction_account_index)` if this is a duplicate
     /// and `None` if it is the first account with this key
     pub fn is_instruction_account_duplicate(
@@ -762,7 +777,7 @@ impl InstructionContext {
         &'a self,
         transaction_context: &'b TransactionContext,
         index_in_transaction: IndexOfAccount,
-        index_in_instruction: IndexOfAccount,
+        index_in_instruction: Option<IndexOfAccount>,
     ) -> Result<BorrowedAccount<'a>, InstructionError> {
         let account = transaction_context
             .accounts
@@ -774,7 +789,7 @@ impl InstructionContext {
             transaction_context,
             instruction_context: self,
             index_in_transaction,
-            index_in_instruction,
+            index_in_instruction_accounts: index_in_instruction,
             account,
         })
     }
@@ -800,11 +815,7 @@ impl InstructionContext {
     ) -> Result<BorrowedAccount<'a>, InstructionError> {
         let index_in_transaction =
             self.get_index_of_program_account_in_transaction(program_account_index)?;
-        self.try_borrow_account(
-            transaction_context,
-            index_in_transaction,
-            program_account_index,
-        )
+        self.try_borrow_account(transaction_context, index_in_transaction, None)
     }
 
     /// Gets an instruction account of this Instruction
@@ -818,8 +829,7 @@ impl InstructionContext {
         self.try_borrow_account(
             transaction_context,
             index_in_transaction,
-            self.get_number_of_program_accounts()
-                .saturating_add(instruction_account_index),
+            Some(instruction_account_index),
         )
     }
 
@@ -863,6 +873,10 @@ impl InstructionContext {
         }
         Ok(result)
     }
+
+    pub fn instruction_accounts(&self) -> &[InstructionAccount] {
+        &self.instruction_accounts
+    }
 }
 
 /// Shared account borrowed from the TransactionContext and an InstructionContext.
@@ -871,7 +885,8 @@ pub struct BorrowedAccount<'a> {
     transaction_context: &'a TransactionContext,
     instruction_context: &'a InstructionContext,
     index_in_transaction: IndexOfAccount,
-    index_in_instruction: IndexOfAccount,
+    // Program accounts are not part of the instruction_accounts vector, and thus None
+    index_in_instruction_accounts: Option<IndexOfAccount>,
     account: RefMut<'a, AccountSharedData>,
 }
 
@@ -1182,28 +1197,24 @@ impl BorrowedAccount<'_> {
 
     /// Returns whether this account is a signer (instruction wide)
     pub fn is_signer(&self) -> bool {
-        if self.index_in_instruction < self.instruction_context.get_number_of_program_accounts() {
-            return false;
+        if let Some(index_in_instruction_accounts) = self.index_in_instruction_accounts {
+            self.instruction_context
+                .is_instruction_account_signer(index_in_instruction_accounts)
+                .unwrap_or_default()
+        } else {
+            false
         }
-        self.instruction_context
-            .is_instruction_account_signer(
-                self.index_in_instruction
-                    .saturating_sub(self.instruction_context.get_number_of_program_accounts()),
-            )
-            .unwrap_or_default()
     }
 
     /// Returns whether this account is writable (instruction wide)
     pub fn is_writable(&self) -> bool {
-        if self.index_in_instruction < self.instruction_context.get_number_of_program_accounts() {
-            return false;
+        if let Some(index_in_instruction_accounts) = self.index_in_instruction_accounts {
+            self.instruction_context
+                .is_instruction_account_writable(index_in_instruction_accounts)
+                .unwrap_or_default()
+        } else {
+            false
         }
-        self.instruction_context
-            .is_instruction_account_writable(
-                self.index_in_instruction
-                    .saturating_sub(self.instruction_context.get_number_of_program_accounts()),
-            )
-            .unwrap_or_default()
     }
 
     /// Returns true if the owner of this account is the current `InstructionContext`s last program (instruction wide)

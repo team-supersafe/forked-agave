@@ -22,7 +22,7 @@ use {
     solana_perf::packet::{self, PacketBatch},
     solana_pubkey::Pubkey,
     solana_rpc::{
-        optimistically_confirmed_bank_tracker::{BankNotification, BankNotificationSender},
+        optimistically_confirmed_bank_tracker::{BankNotification, BankNotificationSenderConfig},
         rpc_subscriptions::RpcSubscriptions,
     },
     solana_runtime::{
@@ -193,12 +193,12 @@ impl ClusterInfoVoteListener {
         verified_packets_sender: BankingPacketSender,
         vote_tracker: Arc<VoteTracker>,
         bank_forks: Arc<RwLock<BankForks>>,
-        subscriptions: Arc<RpcSubscriptions>,
+        subscriptions: Option<Arc<RpcSubscriptions>>,
         verified_vote_sender: VerifiedVoteSender,
         gossip_verified_vote_hash_sender: GossipVerifiedVoteHashSender,
         replay_votes_receiver: ReplayVoteReceiver,
         blockstore: Arc<Blockstore>,
-        bank_notification_sender: Option<BankNotificationSender>,
+        bank_notification_sender: Option<BankNotificationSenderConfig>,
         duplicate_confirmed_slot_sender: DuplicateConfirmedSlotsSender,
     ) -> Self {
         let (verified_vote_transactions_sender, verified_vote_transactions_receiver) = unbounded();
@@ -230,7 +230,7 @@ impl ClusterInfoVoteListener {
                     vote_tracker,
                     &mut bank_hash_cache,
                     dumped_slot_subscription,
-                    subscriptions,
+                    subscriptions.as_deref(),
                     gossip_verified_vote_hash_sender,
                     verified_vote_sender,
                     replay_votes_receiver,
@@ -318,12 +318,12 @@ impl ClusterInfoVoteListener {
         vote_tracker: Arc<VoteTracker>,
         bank_hash_cache: &mut BankHashCache,
         dumped_slot_subscription: DumpedSlotSubscription,
-        subscriptions: Arc<RpcSubscriptions>,
+        subscriptions: Option<&RpcSubscriptions>,
         gossip_verified_vote_hash_sender: GossipVerifiedVoteHashSender,
         verified_vote_sender: VerifiedVoteSender,
         replay_votes_receiver: ReplayVoteReceiver,
         blockstore: Arc<Blockstore>,
-        bank_notification_sender: Option<BankNotificationSender>,
+        bank_notification_sender: Option<BankNotificationSenderConfig>,
         duplicate_confirmed_slot_sender: DuplicateConfirmedSlotsSender,
     ) -> Result<()> {
         let mut confirmation_verifier = OptimisticConfirmationVerifier::new(bank_hash_cache.root());
@@ -355,7 +355,7 @@ impl ClusterInfoVoteListener {
                 &gossip_vote_txs_receiver,
                 &vote_tracker,
                 &root_bank,
-                &subscriptions,
+                subscriptions,
                 &gossip_verified_vote_hash_sender,
                 &verified_vote_sender,
                 &replay_votes_receiver,
@@ -389,11 +389,11 @@ impl ClusterInfoVoteListener {
         gossip_vote_txs_receiver: &VerifiedVoteTransactionsReceiver,
         vote_tracker: &VoteTracker,
         root_bank: &Bank,
-        subscriptions: &RpcSubscriptions,
+        subscriptions: Option<&RpcSubscriptions>,
         gossip_verified_vote_hash_sender: &GossipVerifiedVoteHashSender,
         verified_vote_sender: &VerifiedVoteSender,
         replay_votes_receiver: &ReplayVoteReceiver,
-        bank_notification_sender: &Option<BankNotificationSender>,
+        bank_notification_sender: &Option<BankNotificationSenderConfig>,
         duplicate_confirmed_slot_sender: &Option<DuplicateConfirmedSlotsSender>,
         vote_processing_time: &mut Option<VoteProcessingTiming>,
         latest_vote_slot_per_validator: &mut HashMap<Pubkey, Slot>,
@@ -445,13 +445,13 @@ impl ClusterInfoVoteListener {
         vote_transaction_signature: Signature,
         vote_tracker: &VoteTracker,
         root_bank: &Bank,
-        subscriptions: &RpcSubscriptions,
+        rpc_subscriptions: Option<&RpcSubscriptions>,
         verified_vote_sender: &VerifiedVoteSender,
         gossip_verified_vote_hash_sender: &GossipVerifiedVoteHashSender,
         diff: &mut HashMap<Slot, HashMap<Pubkey, bool>>,
         new_optimistic_confirmed_slots: &mut ThresholdConfirmedSlots,
         is_gossip_vote: bool,
-        bank_notification_sender: &Option<BankNotificationSender>,
+        bank_notification_sender: &Option<BankNotificationSenderConfig>,
         duplicate_confirmed_slot_sender: &Option<DuplicateConfirmedSlotsSender>,
         latest_vote_slot_per_validator: &mut HashMap<Pubkey, Slot>,
         bank_hash_cache: &mut BankHashCache,
@@ -542,8 +542,16 @@ impl ClusterInfoVoteListener {
                     new_optimistic_confirmed_slots.push((slot, hash));
                     // Notify subscribers about new optimistic confirmation
                     if let Some(sender) = bank_notification_sender {
+                        let dependency_work = sender
+                            .dependency_tracker
+                            .as_ref()
+                            .map(|s| s.get_current_declared_work());
                         sender
-                            .send(BankNotification::OptimisticallyConfirmed(slot))
+                            .sender
+                            .send((
+                                BankNotification::OptimisticallyConfirmed(slot),
+                                dependency_work,
+                            ))
                             .unwrap_or_else(|err| {
                                 warn!("bank_notification_sender failed: {err:?}")
                             });
@@ -586,7 +594,9 @@ impl ClusterInfoVoteListener {
         *latest_vote_slot = max(*latest_vote_slot, last_vote_slot);
 
         if is_new_vote {
-            subscriptions.notify_vote(*vote_pubkey, vote, vote_transaction_signature);
+            if let Some(rpc_subscriptions) = rpc_subscriptions {
+                rpc_subscriptions.notify_vote(*vote_pubkey, vote, vote_transaction_signature);
+            }
             let _ = verified_vote_sender.send((*vote_pubkey, vote_slots));
         }
     }
@@ -597,10 +607,10 @@ impl ClusterInfoVoteListener {
         gossip_vote_txs: Vec<Transaction>,
         replayed_votes: Vec<ParsedVote>,
         root_bank: &Bank,
-        subscriptions: &RpcSubscriptions,
+        subscriptions: Option<&RpcSubscriptions>,
         gossip_verified_vote_hash_sender: &GossipVerifiedVoteHashSender,
         verified_vote_sender: &VerifiedVoteSender,
-        bank_notification_sender: &Option<BankNotificationSender>,
+        bank_notification_sender: &Option<BankNotificationSenderConfig>,
         duplicate_confirmed_slot_sender: &Option<DuplicateConfirmedSlotsSender>,
         vote_processing_time: &mut Option<VoteProcessingTiming>,
         latest_vote_slot_per_validator: &mut HashMap<Pubkey, Slot>,
@@ -881,7 +891,7 @@ mod tests {
             &votes_receiver,
             &vote_tracker,
             &bank3,
-            &subscriptions,
+            Some(&subscriptions),
             &gossip_verified_vote_hash_sender,
             &verified_vote_sender,
             &replay_votes_receiver,
@@ -916,7 +926,7 @@ mod tests {
             &votes_receiver,
             &vote_tracker,
             &bank3,
-            &subscriptions,
+            Some(&subscriptions),
             &gossip_verified_vote_hash_sender,
             &verified_vote_sender,
             &replay_votes_receiver,
@@ -1010,7 +1020,7 @@ mod tests {
             &votes_txs_receiver,
             &vote_tracker,
             &bank0,
-            &subscriptions,
+            Some(&subscriptions),
             &gossip_verified_vote_hash_sender,
             &verified_vote_sender,
             &replay_votes_receiver,
@@ -1180,7 +1190,7 @@ mod tests {
             &votes_txs_receiver,
             &vote_tracker,
             &bank0,
-            &subscriptions,
+            Some(&subscriptions),
             &gossip_verified_vote_hash_sender,
             &verified_vote_sender,
             &replay_votes_receiver,
@@ -1293,7 +1303,7 @@ mod tests {
                     &votes_receiver,
                     &vote_tracker,
                     &bank,
-                    &subscriptions,
+                    Some(&subscriptions),
                     &gossip_verified_vote_hash_sender,
                     &verified_vote_sender,
                     &replay_votes_receiver,
@@ -1389,7 +1399,7 @@ mod tests {
                 Signature::default(),
             )],
             &bank,
-            &subscriptions,
+            Some(&subscriptions),
             &gossip_verified_vote_hash_sender,
             &verified_vote_sender,
             &None,
@@ -1438,7 +1448,7 @@ mod tests {
                 Signature::default(),
             )],
             &new_root_bank,
-            &subscriptions,
+            Some(&subscriptions),
             &gossip_verified_vote_hash_sender,
             &verified_vote_sender,
             &None,
@@ -1656,7 +1666,7 @@ mod tests {
             signature,
             &vote_tracker,
             &bank,
-            &subscriptions,
+            Some(&subscriptions),
             &verified_vote_sender,
             &gossip_verified_vote_hash_sender,
             &mut diff,
@@ -1689,7 +1699,7 @@ mod tests {
             signature,
             &vote_tracker,
             &bank,
-            &subscriptions,
+            Some(&subscriptions),
             &verified_vote_sender,
             &gossip_verified_vote_hash_sender,
             &mut diff,

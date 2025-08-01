@@ -1612,7 +1612,6 @@ mod tests {
             0,    // parent_slot
             true, // is_full_slot
             0,    // version
-            true, // merkle_variant
         );
         blockstore.insert_shreds(shreds, None, false).unwrap();
         blockstore.set_roots(std::iter::once(&bank.slot())).unwrap();
@@ -1626,6 +1625,7 @@ mod tests {
             None,
             blockstore.clone(),
             false,
+            None, // no work dependency tracker
             tss_exit.clone(),
         );
 
@@ -1633,6 +1633,7 @@ mod tests {
         let committer = Committer::new(
             Some(TransactionStatusSender {
                 sender: transaction_status_sender,
+                dependency_tracker: None,
             }),
             replay_vote_sender,
             Arc::new(PrioritizationFeeCache::new(0u64)),
@@ -1757,7 +1758,6 @@ mod tests {
             0,    // parent_slot
             true, // is_full_slot
             0,    // version
-            true, // merkle_variant
         );
         blockstore.insert_shreds(shreds, None, false).unwrap();
         blockstore.set_roots(std::iter::once(&bank.slot())).unwrap();
@@ -1771,6 +1771,7 @@ mod tests {
             None,
             blockstore.clone(),
             false,
+            None, // no work dependency tracker
             tss_exit.clone(),
         );
 
@@ -1778,6 +1779,7 @@ mod tests {
         let committer = Committer::new(
             Some(TransactionStatusSender {
                 sender: transaction_status_sender,
+                dependency_tracker: None,
             }),
             replay_vote_sender,
             Arc::new(PrioritizationFeeCache::new(0u64)),

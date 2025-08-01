@@ -270,8 +270,8 @@ impl solana_sysvar::program_stubs::SyscallStubs for SyscallStubs {
             .map(|seeds| Pubkey::create_program_address(seeds, caller).unwrap())
             .collect::<Vec<_>>();
 
-        let (instruction_accounts, program_indices) = invoke_context
-            .prepare_instruction(instruction, &signers)
+        invoke_context
+            .prepare_next_instruction(instruction, &signers)
             .unwrap();
 
         // Copy caller's account_info modifications into invoke_context accounts
@@ -279,8 +279,13 @@ impl solana_sysvar::program_stubs::SyscallStubs for SyscallStubs {
         let instruction_context = transaction_context
             .get_current_instruction_context()
             .unwrap();
-        let mut account_indices = Vec::with_capacity(instruction_accounts.len());
-        for instruction_account in instruction_accounts.iter() {
+
+        let next_instruction_accounts = transaction_context
+            .get_next_instruction_context()
+            .unwrap()
+            .instruction_accounts();
+        let mut account_indices = Vec::with_capacity(next_instruction_accounts.len());
+        for instruction_account in next_instruction_accounts.iter() {
             let account_key = transaction_context
                 .get_key_of_account_at_index(instruction_account.index_in_transaction)
                 .unwrap();
@@ -290,11 +295,11 @@ impl solana_sysvar::program_stubs::SyscallStubs for SyscallStubs {
                 .ok_or(InstructionError::MissingAccount)
                 .unwrap();
             let account_info = &account_infos[account_info_index];
+            let index_in_caller = instruction_context
+                .get_index_of_account_in_instruction(instruction_account.index_in_transaction)
+                .unwrap();
             let mut borrowed_account = instruction_context
-                .try_borrow_instruction_account(
-                    transaction_context,
-                    instruction_account.index_in_caller,
-                )
+                .try_borrow_instruction_account(transaction_context, index_in_caller)
                 .unwrap();
             if borrowed_account.get_lamports() != account_info.lamports() {
                 borrowed_account
@@ -319,19 +324,14 @@ impl solana_sysvar::program_stubs::SyscallStubs for SyscallStubs {
                     .unwrap();
             }
             if instruction_account.is_writable() {
-                account_indices.push((instruction_account.index_in_caller, account_info_index));
+                account_indices
+                    .push((instruction_account.index_in_transaction, account_info_index));
             }
         }
 
         let mut compute_units_consumed = 0;
         invoke_context
-            .process_instruction(
-                &instruction.data,
-                &instruction_accounts,
-                &program_indices,
-                &mut compute_units_consumed,
-                &mut ExecuteTimings::default(),
-            )
+            .process_instruction(&mut compute_units_consumed, &mut ExecuteTimings::default())
             .map_err(|err| ProgramError::try_from(err).unwrap_or_else(|err| panic!("{}", err)))?;
 
         // Copy invoke_context accounts modifications into caller's account_info
@@ -339,7 +339,10 @@ impl solana_sysvar::program_stubs::SyscallStubs for SyscallStubs {
         let instruction_context = transaction_context
             .get_current_instruction_context()
             .unwrap();
-        for (index_in_caller, account_info_index) in account_indices.into_iter() {
+        for (index_in_transaction, account_info_index) in account_indices.into_iter() {
+            let index_in_caller = instruction_context
+                .get_index_of_account_in_instruction(index_in_transaction)
+                .unwrap();
             let borrowed_account = instruction_context
                 .try_borrow_instruction_account(transaction_context, index_in_caller)
                 .unwrap();
