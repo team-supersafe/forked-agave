@@ -1,4 +1,4 @@
-name: Sync Tags and Create Releases
+name: Sync Tags Only
 
 on:
   schedule:
@@ -11,70 +11,42 @@ permissions:
 jobs:
   sync-tags:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
 
       - name: Set up git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global credential.helper store
-          echo "https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com" > ~/.git-credentials
 
       - name: Add upstream remote
         run: |
           git remote add upstream https://github.com/anza-xyz/agave.git
-          git remote set-url origin https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/team-supersafe/forked-agave.git
 
-      - name: Sync new tags
+      - name: Sync tags from upstream
         run: |
-          # Get list of tags that exist upstream but not in our fork
-          # Filter out peeled tags (^{} suffix), get unique tag names, and only v2.2+ tags
-          for tag in $(git ls-remote --tags upstream | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
-            if ! git tag -l | grep -q "^$tag$"; then
-              echo "Syncing tag: $tag"
-              # Fetch the specific tag from upstream
-              git fetch upstream tag $tag
-              # Get the commit hash for this tag
-              commit_hash=$(git rev-parse FETCH_HEAD)
-              # Check if this commit contains workflow files that might cause permission issues
-              if git show --name-only "$commit_hash" | grep -q "^\.github/workflows/"; then
-                echo "Warning: Skipping tag $tag as it contains workflow files that require special permissions"
-                continue
-              fi
-              # Create a lightweight tag pointing to the fetched commit
-              git tag -f "$tag" "$commit_hash"
-              # Try to push the tag
-              if ! git push origin "$tag" --force; then
-                echo "Warning: Failed to push tag $tag"
-              else
-                echo "Successfully synced tag: $tag"
-              fi
+          # Fetch all tags from upstream
+          git fetch upstream --tags
+          
+          # Get list of tags that match our pattern
+          for tag in $(git tag -l | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
+            echo "Processing tag: $tag"
+            
+            # Check if tag already exists in origin
+            if git ls-remote --tags origin | grep -q "refs/tags/$tag$"; then
+              echo "Tag $tag already exists in origin, skipping"
+              continue
             fi
-          done
 
-  create-releases:
-    runs-on: ubuntu-latest
-    needs: sync-tags
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Checkout fork
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+            # Get the actual commit that the tag points to (not the tag itself)
+            commit_hash=$(git rev-parse "$tag^{commit}")
 
-      - name: Create missing releases
-        run: |
-          # Get all v2.2+ tags from upstream
-          for tag in $(git ls-remote --tags https://github.com/anza-xyz/agave.git | sed 's|.*refs/tags/||' | grep -v '\^{}$' | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
-            if ! gh release view "$tag" --repo team-supersafe/forked-agave >/dev/null 2>&1; then
-              echo "Creating release for tag: $tag"
-              gh release create "$tag" --title "Release $tag" --notes "Mirrored from upstream anza-xyz/agave" --repo team-supersafe/forked-agave
-            fi
+            # Create annotated tag locally and push
+            git tag -a "$tag" -m "Release $tag" "$commit_hash" -f
+            git push origin "$tag"
+            echo "Successfully synced tag: $tag"
           done
