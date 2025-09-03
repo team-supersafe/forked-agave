@@ -82,8 +82,8 @@ use {
     },
     solana_measure::measure::Measure,
     solana_metrics::{datapoint_info, metrics::metrics_config_sanity_check},
-    solana_net_utils::multihomed_sockets::EgressSocketSelect,
     solana_poh::{
+        poh_controller::PohController,
         poh_recorder::PohRecorder,
         poh_service::{self, PohService},
         transaction_recorder::TransactionRecorder,
@@ -869,11 +869,6 @@ impl Validator {
         cluster_info.set_entrypoints(cluster_entrypoints);
         cluster_info.restore_contact_info(ledger_path, config.contact_save_interval);
         cluster_info.set_bind_ip_addrs(node.bind_ip_addrs.clone());
-        let tvu_sockets_per_interface =
-            node.sockets.retransmit_sockets.len() / node.bind_ip_addrs.len();
-        cluster_info.init_egress_socket_select(Arc::new(EgressSocketSelect::new(
-            tvu_sockets_per_interface,
-        )));
         let cluster_info = Arc::new(cluster_info);
         let node_multihoming = Arc::new(NodeMultihoming::from(&node));
 
@@ -966,6 +961,7 @@ impl Validator {
         let transaction_recorder =
             TransactionRecorder::new(record_sender, poh_recorder.is_exited.clone());
         let poh_recorder = Arc::new(RwLock::new(poh_recorder));
+        let (poh_controller, poh_service_message_receiver) = PohController::new();
 
         let (banking_tracer, tracer_thread) =
             BankingTracer::new((config.banking_trace_dir_byte_limit > 0).then_some((
@@ -1378,6 +1374,7 @@ impl Validator {
             config.poh_pinned_cpu_core,
             config.poh_hashes_per_batch,
             record_receiver,
+            poh_service_message_receiver,
         );
         assert_eq!(
             blockstore.get_new_shred_signals_len(),
@@ -1548,6 +1545,7 @@ impl Validator {
             ledger_signal_receiver,
             rpc_subscriptions.clone(),
             &poh_recorder,
+            poh_controller,
             tower,
             config.tower_storage.clone(),
             &leader_schedule_cache,
