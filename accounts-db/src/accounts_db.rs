@@ -50,7 +50,7 @@ use {
         accounts_update_notifier_interface::{AccountForGeyser, AccountsUpdateNotifier},
         active_stats::{ActiveStatItem, ActiveStats},
         ancestors::Ancestors,
-        append_vec::{self, aligned_stored_size, IndexInfo, IndexInfoInner, STORE_META_OVERHEAD},
+        append_vec::{self, aligned_stored_size, STORE_META_OVERHEAD},
         buffered_reader::RequiredLenBufFileRead,
         contains::Contains,
         is_zero_lamport::IsZeroLamport,
@@ -306,7 +306,6 @@ pub const ACCOUNTS_DB_CONFIG_FOR_TESTING: AccountsDbConfig = AccountsDbConfig {
     mark_obsolete_accounts: MarkObsoleteAccounts::Disabled,
     num_background_threads: None,
     num_foreground_threads: None,
-    num_hash_threads: None,
     memlock_budget_size: MEMLOCK_BUDGET_SIZE_FOR_TESTS,
 };
 pub const ACCOUNTS_DB_CONFIG_FOR_BENCHMARKS: AccountsDbConfig = AccountsDbConfig {
@@ -329,7 +328,6 @@ pub const ACCOUNTS_DB_CONFIG_FOR_BENCHMARKS: AccountsDbConfig = AccountsDbConfig
     mark_obsolete_accounts: MarkObsoleteAccounts::Disabled,
     num_background_threads: None,
     num_foreground_threads: None,
-    num_hash_threads: None,
     memlock_budget_size: MEMLOCK_BUDGET_SIZE_FOR_TESTS,
 };
 
@@ -455,8 +453,6 @@ pub struct AccountsDbConfig {
     pub num_background_threads: Option<NonZeroUsize>,
     /// Number of threads for foreground operations (`thread_pool_foreground`)
     pub num_foreground_threads: Option<NonZeroUsize>,
-    /// Number of threads for background accounts hashing
-    pub num_hash_threads: Option<NonZeroUsize>,
     /// Amount of memory (in bytes) that is allowed to be locked during db operations.
     /// On linux it's verified on start-up with the kernel limits, such that during runtime
     /// parts of it can be utilized without panicking.
@@ -1278,8 +1274,6 @@ pub struct AccountsDb {
     pub thread_pool_foreground: ThreadPool,
     /// Thread pool for background tasks, e.g. AccountsBackgroundService and flush/clean/shrink
     pub thread_pool_background: ThreadPool,
-    // number of threads to use for accounts hash verify at startup
-    pub num_hash_threads: Option<NonZeroUsize>,
 
     pub stats: AccountsStats,
 
@@ -1370,12 +1364,6 @@ pub fn quarter_thread_count() -> usize {
     std::cmp::max(2, num_cpus::get() / 4)
 }
 
-/// Returns the default number of threads to use for background accounts hashing
-pub fn default_num_hash_threads() -> NonZeroUsize {
-    // 1/8 of the number of cpus and up to 6 threads gives good balance for the system.
-    let num_threads = (num_cpus::get() / 8).clamp(2, 6);
-    NonZeroUsize::new(num_threads).unwrap()
-}
 pub fn default_num_foreground_threads() -> usize {
     get_thread_count()
 }
@@ -1537,7 +1525,6 @@ impl AccountsDb {
             scan_filter_for_shrinking: accounts_db_config.scan_filter_for_shrinking,
             thread_pool_foreground,
             thread_pool_background,
-            num_hash_threads: accounts_db_config.num_hash_threads,
             active_stats: ActiveStats::default(),
             storage: AccountStorage::default(),
             accounts_cache: AccountsCache::default(),
@@ -6537,104 +6524,89 @@ impl AccountsDb {
         let mut zero_lamport_offsets = vec![];
         let mut all_accounts_are_zero_lamports = true;
         let mut slot_lt_hash = SlotLtHash::default();
+        let mut keyed_account_infos = vec![];
 
-        let (insert_time_us, generate_index_results) = {
-            let mut keyed_account_infos = vec![];
-            // this closure is the shared code when scanning the storage
-            let mut itemizer = |info: IndexInfo| {
-                stored_size_alive += info.stored_size_aligned;
-                if info.index_info.lamports > 0 {
-                    accounts_data_len += info.index_info.data_len;
+        let geyser_notifier = self
+            .accounts_update_notifier
+            .as_ref()
+            .filter(|notifier| notifier.snapshot_notifications_enabled());
+
+        // If geyser notifications at startup from snapshot are enabled, we need to pass in a
+        // write version for each account notification.  This value does not need to be
+        // globally unique, as geyser plugins also receive the slot number.  We only need to
+        // ensure that more recent accounts have a higher write version than older accounts.
+        // Even more relaxed, we really only need to have different write versions if there are
+        // multiple versions of the same account in a single storage, which is not allowed.
+        //
+        // Since we scan the storage from oldest to newest, we can simply increment a local
+        // counter per account and use that for the write version.
+        let mut write_version_for_geyser = 0;
+
+        storage
+            .accounts
+            .scan_accounts(reader, |offset, account| {
+                let data_len = account.data.len();
+                stored_size_alive += storage.accounts.calculate_stored_size(data_len);
+                if account.lamports > 0 {
+                    accounts_data_len += data_len as u64;
                     all_accounts_are_zero_lamports = false;
                 } else {
                     // With obsolete accounts enabled, all zero lamport accounts
                     // are obsolete or single ref by the end of index generation
                     // Store the offsets here
                     if self.mark_obsolete_accounts == MarkObsoleteAccounts::Enabled {
-                        zero_lamport_offsets.push(info.index_info.offset);
+                        zero_lamport_offsets.push(offset);
                     }
-                    zero_lamport_pubkeys.push(info.index_info.pubkey);
+                    zero_lamport_pubkeys.push(*account.pubkey);
                 }
                 keyed_account_infos.push((
-                    info.index_info.pubkey,
+                    *account.pubkey,
                     AccountInfo::new(
-                        StorageLocation::AppendVec(store_id, info.index_info.offset), // will never be cached
-                        info.index_info.is_zero_lamport(),
+                        StorageLocation::AppendVec(store_id, offset), // will never be cached
+                        account.is_zero_lamport(),
                     ),
                 ));
-            };
 
-            let geyser_notifier = self
-                .accounts_update_notifier
-                .as_ref()
-                .filter(|notifier| notifier.snapshot_notifications_enabled());
+                if !self.account_indexes.is_empty() {
+                    self.accounts_index.update_secondary_indexes(
+                        account.pubkey,
+                        &account,
+                        &self.account_indexes,
+                    );
+                }
 
-            // If geyser notifications at startup from snapshot are enabled, we need to pass in a
-            // write version for each account notification.  This value does not need to be
-            // globally unique, as geyser plugins also receive the slot number.  We only need to
-            // ensure that more recent accounts have a higher write version than older accounts.
-            // Even more relaxed, we really only need to have different write versions if there are
-            // multiple versions of the same account in a single storage, which is not allowed.
-            //
-            // Since we scan the storage from oldest to newest, we can simply increment a local
-            // counter per account and use that for the write version.
-            let mut write_version_for_geyser = 0;
+                let account_lt_hash = Self::lt_hash_account(&account, account.pubkey());
+                slot_lt_hash.0.mix_in(&account_lt_hash.0);
 
-            storage
-                .accounts
-                .scan_accounts(reader, |offset, account| {
-                    let data_len = account.data.len() as u64;
-                    let stored_size_aligned =
-                        storage.accounts.calculate_stored_size(data_len as usize);
-                    let info = IndexInfo {
-                        stored_size_aligned,
-                        index_info: IndexInfoInner {
-                            offset,
-                            pubkey: *account.pubkey,
-                            lamports: account.lamports,
-                            data_len,
-                        },
+                if let Some(geyser_notifier) = geyser_notifier {
+                    debug_assert!(geyser_notifier.snapshot_notifications_enabled());
+                    let account_for_geyser = AccountForGeyser {
+                        pubkey: account.pubkey(),
+                        lamports: account.lamports(),
+                        owner: account.owner(),
+                        executable: account.executable(),
+                        rent_epoch: account.rent_epoch(),
+                        data: account.data(),
                     };
-                    itemizer(info);
-                    if !self.account_indexes.is_empty() {
-                        self.accounts_index.update_secondary_indexes(
-                            account.pubkey,
-                            &account,
-                            &self.account_indexes,
-                        );
-                    }
+                    geyser_notifier.notify_account_restore_from_snapshot(
+                        slot,
+                        write_version_for_geyser,
+                        &account_for_geyser,
+                    );
+                    write_version_for_geyser += 1;
+                }
+            })
+            .expect("must scan accounts storage");
 
-                    let account_lt_hash = Self::lt_hash_account(&account, account.pubkey());
-                    slot_lt_hash.0.mix_in(&account_lt_hash.0);
-
-                    if let Some(geyser_notifier) = geyser_notifier {
-                        debug_assert!(geyser_notifier.snapshot_notifications_enabled());
-                        let account_for_geyser = AccountForGeyser {
-                            pubkey: account.pubkey(),
-                            lamports: account.lamports(),
-                            owner: account.owner(),
-                            executable: account.executable(),
-                            rent_epoch: account.rent_epoch(),
-                            data: account.data(),
-                        };
-                        geyser_notifier.notify_account_restore_from_snapshot(
-                            slot,
-                            write_version_for_geyser,
-                            &account_for_geyser,
-                        );
-                        write_version_for_geyser += 1;
-                    }
-                })
-                .expect("must scan accounts storage");
-            self.accounts_index
-                .insert_new_if_missing_into_primary_index(slot, keyed_account_infos)
-        };
+        let (insert_time_us, insert_info) = self
+            .accounts_index
+            .insert_new_if_missing_into_primary_index(slot, keyed_account_infos);
 
         {
             // second, collect into the shared DashMap once we've figured out all the info per store_id
             let mut info = storage_info.entry(store_id).or_default();
             info.stored_size += stored_size_alive;
-            info.count += generate_index_results.count;
+            info.count += insert_info.count;
 
             // sanity check that stored_size is not larger than the u64 aligned size of the accounts files.
             // Note that the stored_size is aligned, so it can be larger than the size of the accounts file.
@@ -6667,13 +6639,13 @@ impl AccountsDb {
         }
         SlotIndexGenerationInfo {
             insert_time_us,
-            num_accounts: generate_index_results.count as u64,
+            num_accounts: insert_info.count as u64,
             accounts_data_len,
             zero_lamport_pubkeys,
             all_accounts_are_zero_lamports,
-            num_did_not_exist: generate_index_results.num_did_not_exist,
-            num_existed_in_mem: generate_index_results.num_existed_in_mem,
-            num_existed_on_disk: generate_index_results.num_existed_on_disk,
+            num_did_not_exist: insert_info.num_did_not_exist,
+            num_existed_in_mem: insert_info.num_existed_in_mem,
+            num_existed_on_disk: insert_info.num_existed_on_disk,
             slot_lt_hash,
         }
     }
