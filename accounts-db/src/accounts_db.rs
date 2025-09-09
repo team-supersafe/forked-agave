@@ -42,9 +42,9 @@ use {
         accounts_hash::{AccountLtHash, AccountsLtHash, ZERO_LAMPORT_ACCOUNT_LT_HASH},
         accounts_index::{
             in_mem_accounts_index::StartupStats, AccountSecondaryIndexes, AccountsIndex,
-            AccountsIndexConfig, AccountsIndexRootsStats, AccountsIndexScanResult, DiskIndexValue,
-            IndexKey, IndexValue, IsCached, RefCount, ScanConfig, ScanFilter, ScanResult, SlotList,
-            UpsertReclaim, ACCOUNTS_INDEX_CONFIG_FOR_BENCHMARKS, ACCOUNTS_INDEX_CONFIG_FOR_TESTING,
+            AccountsIndexConfig, AccountsIndexRootsStats, AccountsIndexScanResult, IndexKey,
+            IsCached, RefCount, ScanConfig, ScanFilter, ScanResult, SlotList, UpsertReclaim,
+            ACCOUNTS_INDEX_CONFIG_FOR_BENCHMARKS, ACCOUNTS_INDEX_CONFIG_FOR_TESTING,
         },
         accounts_index_storage::Startup,
         accounts_update_notifier_interface::{AccountForGeyser, AccountsUpdateNotifier},
@@ -657,9 +657,6 @@ impl GenerateIndexTimings {
         );
     }
 }
-
-impl IndexValue for AccountInfo {}
-impl DiskIndexValue for AccountInfo {}
 
 impl IsZeroLamport for AccountSharedData {
     fn is_zero_lamport(&self) -> bool {
@@ -6325,22 +6322,11 @@ impl AccountsDb {
         let mut cache_time = Measure::start("cache_add_root");
         self.accounts_cache.add_root(slot);
         cache_time.stop();
-        let mut store_time = Measure::start("store_add_root");
-        // We would not expect this slot to be shrinking right now, but other slots may be.
-        // But, even if it was, we would just mark a store id as dirty unnecessarily and that is ok.
-        // So, allow shrinking to be in progress.
-        if let Some(store) = self
-            .storage
-            .get_slot_storage_entry_shrinking_in_progress_ok(slot)
-        {
-            self.dirty_stores.insert(slot, store);
-        }
-        store_time.stop();
 
         AccountsAddRootTiming {
             index_us: index_time.as_us(),
             cache_us: cache_time.as_us(),
-            store_us: store_time.as_us(),
+            store_us: 0,
         }
     }
 
