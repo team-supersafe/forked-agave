@@ -280,6 +280,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "agave-low-pass-filter"
+version = "3.1.0"
+
+[[package]]
 name = "agave-precompiles"
 version = "3.1.0"
 dependencies = [
@@ -438,6 +442,7 @@ dependencies = [
  "solana-svm-transaction",
  "solana-system-interface",
  "solana-transaction",
+ "solana-transaction-context",
 ]
 
 [[package]]
@@ -546,7 +551,6 @@ dependencies = [
 name = "agave-votor"
 version = "3.1.0"
 dependencies = [
- "agave-votor",
  "anyhow",
  "bincode",
  "bitvec",
@@ -599,7 +603,6 @@ dependencies = [
  "solana-vote",
  "solana-vote-program",
  "solana-votor-messages",
- "tempfile",
  "test-case",
  "thiserror 2.0.17",
  "tokio-util 0.7.16",
@@ -8832,6 +8835,7 @@ name = "solana-gossip"
 version = "3.1.0"
 dependencies = [
  "agave-feature-set",
+ "agave-low-pass-filter",
  "anyhow",
  "arrayvec",
  "assert_matches",
@@ -8859,6 +8863,7 @@ dependencies = [
  "serde_derive",
  "serial_test",
  "siphasher 1.0.1",
+ "solana-account",
  "solana-bloom",
  "solana-clap-utils",
  "solana-client",
@@ -10455,6 +10460,7 @@ dependencies = [
  "solana-system-interface",
  "solana-system-transaction",
  "solana-transaction",
+ "solana-transaction-context",
  "solana-transaction-error",
  "solana-vote-interface",
  "thiserror 2.0.17",
