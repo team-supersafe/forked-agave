@@ -220,7 +220,7 @@ bs58 = { version = "0.5.1", default-features = false }
 bv = "0.11.1"
 byte-unit = "4.0.19"
 bytemuck = "1.23.2"
-bytemuck_derive = "1.10.1"
+bytemuck_derive = "1.10.2"
 bytes = "1.10"
 bzip2 = "0.4.4"
 caps = "0.5.5"
@@ -359,7 +359,7 @@ serde-big-array = "0.5.1"
 serde_bytes = "0.11.19"
 serde_derive = "1.0.228" # must match the serde version, see https://github.com/serde-rs/serde/issues/2584#issuecomment-1685252251
 serde_json = "1.0.145"
-serde_with = { version = "3.14.1", default-features = false }
+serde_with = { version = "3.15.0", default-features = false }
 serde_yaml = "0.9.34"
 serial_test = "2.0.0"
 sha2 = "0.10.9"
