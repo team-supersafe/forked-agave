@@ -8103,6 +8103,7 @@ dependencies = [
  "futures 0.3.31",
  "histogram",
  "itertools 0.12.1",
+ "libc",
  "log",
  "lru",
  "min-max-heap",
@@ -9058,7 +9059,6 @@ dependencies = [
  "futures 0.3.31",
  "itertools 0.12.1",
  "lazy-lru",
- "libc",
  "log",
  "lru",
  "mockall",
@@ -11572,6 +11572,7 @@ name = "solana-turbine"
 version = "3.1.0"
 dependencies = [
  "agave-feature-set",
+ "agave-votor",
  "agave-xdp",
  "assert_matches",
  "bencher",
@@ -14055,6 +14056,17 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.4.14",
  "rustix 0.38.39",
+]
+
+[[package]]
+name = "xtask"
+version = "3.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.5.31",
+ "env_logger",
+ "log",
+ "tokio",
 ]
 
 [[package]]
