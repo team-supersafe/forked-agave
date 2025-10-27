@@ -173,11 +173,13 @@ name = "agave-snapshots"
 version = "3.1.0"
 dependencies = [
  "agave-fs",
+ "bincode",
  "bzip2",
  "crossbeam-channel",
  "log",
  "lz4",
  "rand 0.8.5",
+ "semver",
  "solana-accounts-db",
  "solana-clock",
  "solana-genesis-config",
@@ -6531,6 +6533,7 @@ dependencies = [
  "solana-fee-calculator",
  "solana-fee-structure",
  "solana-genesis-config",
+ "solana-genesis-utils",
  "solana-geyser-plugin-manager",
  "solana-gossip",
  "solana-hard-forks",
@@ -6956,6 +6959,7 @@ dependencies = [
  "solana-genesis-config",
  "solana-hash",
  "solana-rpc-client",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -7233,6 +7237,7 @@ dependencies = [
  "solana-entry",
  "solana-epoch-schedule",
  "solana-genesis-config",
+ "solana-genesis-utils",
  "solana-hash",
  "solana-instruction",
  "solana-keypair",
@@ -9649,6 +9654,7 @@ dependencies = [
  "solana-epoch-schedule",
  "solana-feature-gate-interface",
  "solana-fee-calculator",
+ "solana-genesis-utils",
  "solana-geyser-plugin-manager",
  "solana-gossip",
  "solana-inflation",
@@ -10107,6 +10113,7 @@ dependencies = [
  "rayon",
  "solana-clock",
  "solana-entry",
+ "solana-genesis-utils",
  "solana-gossip",
  "solana-hash",
  "solana-ledger",
