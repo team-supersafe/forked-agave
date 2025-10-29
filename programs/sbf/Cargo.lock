@@ -186,8 +186,12 @@ dependencies = [
  "solana-genesis-config",
  "solana-hash",
  "solana-lattice-hash",
+ "solana-measure",
+ "solana-metrics",
  "strum",
+ "symlink",
  "tar",
+ "tempfile",
  "thiserror 2.0.17",
  "zstd",
 ]
@@ -7071,6 +7075,7 @@ version = "3.1.0"
 dependencies = [
  "agave-feature-set",
  "agave-logger",
+ "arc-swap",
  "arrayvec",
  "assert_matches",
  "bincode",
@@ -8317,10 +8322,8 @@ dependencies = [
  "strum",
  "strum_macros",
  "symlink",
- "tar",
  "tempfile",
  "thiserror 2.0.17",
- "zstd",
 ]
 
 [[package]]
