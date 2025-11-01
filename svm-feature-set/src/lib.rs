@@ -50,6 +50,8 @@ pub struct SVMFeatureSet {
     pub increase_cpi_account_info_limit: bool,
     pub vote_state_v4: bool,
     pub poseidon_enforce_padding: bool,
+    pub fix_alt_bn128_pairing_length_check: bool,
+    pub alt_bn128_little_endian: bool,
 }
 
 impl SVMFeatureSet {
@@ -96,6 +98,8 @@ impl SVMFeatureSet {
             increase_cpi_account_info_limit: true,
             vote_state_v4: true,
             poseidon_enforce_padding: true,
+            fix_alt_bn128_pairing_length_check: true,
+            alt_bn128_little_endian: true,
         }
     }
 }

@@ -116,7 +116,7 @@ use {
     solana_precompile_error::PrecompileError,
     solana_program_runtime::{
         invoke_context::BuiltinFunctionWithContext,
-        loaded_programs::{ProgramCacheEntry, ProgramRuntimeEnvironment},
+        loaded_programs::{ProgramCacheEntry, ProgramRuntimeEnvironments},
     },
     solana_pubkey::{Pubkey, PubkeyHasherBuilder},
     solana_reward_info::RewardInfo,
@@ -363,18 +363,13 @@ pub type TransactionBalances = Vec<Vec<u64>>;
 
 pub type PreCommitResult<'a> = Result<Option<RwLockReadGuard<'a, Hash>>>;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub enum TransactionLogCollectorFilter {
     All,
     AllWithVotes,
+    #[default]
     None,
     OnlyMentionedAddresses,
-}
-
-impl Default for TransactionLogCollectorFilter {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Default)]
@@ -1542,24 +1537,22 @@ impl Bank {
                     program_cache.assign_program(&upcoming_environments, key, recompiled);
                 }
             }
-        } else if self.epoch != epoch_boundary_preparation.latest_root_epoch
-            || slot_index.saturating_add(slots_in_recompilation_phase) >= slots_in_epoch
-        {
+        } else if slot_index.saturating_add(slots_in_recompilation_phase) >= slots_in_epoch {
             // Anticipate the upcoming program runtime environment for the next epoch,
             // so we can try to recompile loaded programs before the feature transition hits.
-            let (program_runtime_environment_v1, program_runtime_environment_v2) =
-                self.create_program_runtime_environments(&upcoming_feature_set);
+            let new_environments = self.create_program_runtime_environments(&upcoming_feature_set);
             let mut upcoming_environments = self.transaction_processor.environments.clone();
             let changed_program_runtime_v1 =
-                *upcoming_environments.program_runtime_v1 != *program_runtime_environment_v1;
+                *upcoming_environments.program_runtime_v1 != *new_environments.program_runtime_v1;
             let changed_program_runtime_v2 =
-                *upcoming_environments.program_runtime_v2 != *program_runtime_environment_v2;
+                *upcoming_environments.program_runtime_v2 != *new_environments.program_runtime_v2;
             if changed_program_runtime_v1 {
-                upcoming_environments.program_runtime_v1 = program_runtime_environment_v1;
+                upcoming_environments.program_runtime_v1 = new_environments.program_runtime_v1;
             }
             if changed_program_runtime_v2 {
-                upcoming_environments.program_runtime_v2 = program_runtime_environment_v2;
+                upcoming_environments.program_runtime_v2 = new_environments.program_runtime_v2;
             }
+            epoch_boundary_preparation.upcoming_epoch = self.epoch.saturating_add(1);
             epoch_boundary_preparation.upcoming_environments = Some(upcoming_environments);
             epoch_boundary_preparation.programs_to_recompile = program_cache
                 .get_flattened_entries(changed_program_runtime_v1, changed_program_runtime_v2);
@@ -1655,6 +1648,10 @@ impl Bank {
             },
             rewards_metrics,
         );
+
+        let new_environments = self.create_program_runtime_environments(&self.feature_set);
+        self.transaction_processor
+            .set_environments(new_environments);
     }
 
     pub fn byte_limit_for_scans(&self) -> Option<usize> {
@@ -1930,7 +1927,7 @@ impl Bank {
         self.epoch_schedule().first_normal_epoch
     }
 
-    pub fn freeze_lock(&self) -> RwLockReadGuard<Hash> {
+    pub fn freeze_lock(&self) -> RwLockReadGuard<'_, Hash> {
         self.hash.read().unwrap()
     }
 
@@ -2934,7 +2931,7 @@ impl Bank {
     pub fn prepare_entry_batch(
         &self,
         txs: Vec<VersionedTransaction>,
-    ) -> Result<TransactionBatch<RuntimeTransaction<SanitizedTransaction>>> {
+    ) -> Result<TransactionBatch<'_, '_, RuntimeTransaction<SanitizedTransaction>>> {
         let enable_static_instruction_limit = self
             .feature_set
             .is_active(&agave_feature_set::static_instruction_limit::id());
@@ -3095,6 +3092,8 @@ impl Bank {
                     enable_return_data_recording: true,
                     enable_transaction_balance_recording: true,
                 },
+                drop_on_failure: false,
+                all_or_nothing: false,
             },
         );
 
@@ -3829,6 +3828,8 @@ impl Bank {
                 log_messages_bytes_limit,
                 limit_to_load_programs: false,
                 recording_config,
+                drop_on_failure: false,
+                all_or_nothing: false,
             },
         );
 
@@ -4120,19 +4121,24 @@ impl Bank {
             self.apply_simd_0339_invoke_cost_changes();
         }
 
-        let (program_runtime_environment_v1, program_runtime_environment_v2) =
-            self.create_program_runtime_environments(&self.feature_set);
+        let environments = self.create_program_runtime_environments(&self.feature_set);
         self.transaction_processor
-            .configure_program_runtime_environments(
-                program_runtime_environment_v1,
-                program_runtime_environment_v2,
-            );
+            .global_program_cache
+            .write()
+            .unwrap()
+            .latest_root_slot = self.slot;
+        self.transaction_processor
+            .epoch_boundary_preparation
+            .write()
+            .unwrap()
+            .upcoming_epoch = self.epoch;
+        self.transaction_processor.environments = environments;
     }
 
     fn create_program_runtime_environments(
         &self,
         feature_set: &FeatureSet,
-    ) -> (ProgramRuntimeEnvironment, ProgramRuntimeEnvironment) {
+    ) -> ProgramRuntimeEnvironments {
         let simd_0268_active = feature_set.is_active(&raise_cpi_nesting_limit_to_8::id());
         let simd_0339_active = feature_set.is_active(&increase_cpi_account_info_limit::id());
         let compute_budget = self
@@ -4143,8 +4149,8 @@ impl Bank {
                 simd_0339_active,
             ))
             .to_budget();
-        (
-            Arc::new(
+        ProgramRuntimeEnvironments {
+            program_runtime_v1: Arc::new(
                 create_program_runtime_environment_v1(
                     &feature_set.runtime_features(),
                     &compute_budget,
@@ -4153,11 +4159,11 @@ impl Bank {
                 )
                 .unwrap(),
             ),
-            Arc::new(create_program_runtime_environment_v2(
+            program_runtime_v2: Arc::new(create_program_runtime_environment_v2(
                 &compute_budget,
                 false, /* debugging_features */
             )),
-        )
+        }
     }
 
     pub fn set_tick_height(&self, tick_height: u64) {
@@ -5173,11 +5179,11 @@ impl Bank {
             .shrink_ancient_slots(self.epoch_schedule())
     }
 
-    pub fn read_cost_tracker(&self) -> LockResult<RwLockReadGuard<CostTracker>> {
+    pub fn read_cost_tracker(&self) -> LockResult<RwLockReadGuard<'_, CostTracker>> {
         self.cost_tracker.read()
     }
 
-    pub fn write_cost_tracker(&self) -> LockResult<RwLockWriteGuard<CostTracker>> {
+    pub fn write_cost_tracker(&self) -> LockResult<RwLockWriteGuard<'_, CostTracker>> {
         self.cost_tracker.write()
     }
 
@@ -5352,6 +5358,19 @@ impl Bank {
         }
         if new_feature_activations.contains(&feature_set::increase_cpi_account_info_limit::id()) {
             self.apply_simd_0339_invoke_cost_changes();
+        }
+
+        if new_feature_activations.contains(&feature_set::replace_spl_token_with_p_token::id()) {
+            if let Err(e) = self.upgrade_loader_v2_program_with_loader_v3_program(
+                &feature_set::replace_spl_token_with_p_token::SPL_TOKEN_PROGRAM_ID,
+                &feature_set::replace_spl_token_with_p_token::PTOKEN_PROGRAM_BUFFER,
+                "replace_spl_token_with_p_token",
+            ) {
+                warn!(
+                    "Failed to replace SPL Token with p-token buffer '{}': {e}",
+                    feature_set::replace_spl_token_with_p_token::PTOKEN_PROGRAM_BUFFER,
+                );
+            }
         }
     }
 
@@ -5917,7 +5936,7 @@ impl Bank {
     pub fn prepare_batch_for_tests(
         &self,
         txs: Vec<Transaction>,
-    ) -> TransactionBatch<RuntimeTransaction<SanitizedTransaction>> {
+    ) -> TransactionBatch<'_, '_, RuntimeTransaction<SanitizedTransaction>> {
         let sanitized_txs = txs
             .into_iter()
             .map(RuntimeTransaction::from_transaction_for_tests)
