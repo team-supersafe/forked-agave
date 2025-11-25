@@ -401,7 +401,7 @@ soketto = "0.8"
 solana-account = "3.2.0"
 solana-account-decoder = { path = "account-decoder", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-account-decoder-client-types = { path = "account-decoder-client-types", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
-solana-account-info = "3.0.0"
+solana-account-info = "3.1.0"
 solana-accounts-db = { path = "accounts-db", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-address = "1.1.0"
 solana-address-lookup-table-interface = "3.0.0"
@@ -500,14 +500,14 @@ solana-precompile-error = "3.0.0"
 solana-presigner = "3.0.0"
 solana-program = { version = "3.0.0", default-features = false }
 solana-program-binaries = { path = "program-binaries", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
-solana-program-entrypoint = "3.1.0"
+solana-program-entrypoint = "3.1.1"
 solana-program-error = "3.0.0"
 solana-program-memory = "3.0.0"
 solana-program-option = "3.0.0"
 solana-program-pack = "3.0.0"
 solana-program-runtime = { path = "program-runtime", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-program-test = { path = "program-test", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
-solana-pubkey = { version = "3.0.0", default-features = false }
+solana-pubkey = { version = "4.0.0", default-features = false }
 solana-pubsub-client = { path = "pubsub-client", version = "=4.0.0-alpha.0" }
 solana-quic-client = { path = "quic-client", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-quic-definitions = "3.0.0"
