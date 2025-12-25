@@ -1,0 +1,68 @@
+name: Sync Fork and Tags
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Set up git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote | grep upstream || git remote add upstream https://github.com/anza-xyz/agave.git
+
+      - name: Sync fork with upstream
+        run: |
+          # Fetch all branches and tags from upstream
+          git fetch upstream
+
+          # Get the default branch of upstream
+          UPSTREAM_DEFAULT_BRANCH=$(git remote show upstream | awk '/HEAD branch/ {print $NF}')
+
+          # Switch to that branch locally (create it if it doesn't exist)
+          git checkout $UPSTREAM_DEFAULT_BRANCH 2>/dev/null || git checkout -b $UPSTREAM_DEFAULT_BRANCH origin/$UPSTREAM_DEFAULT_BRANCH
+
+          # Merge upstream changes into the local branch
+          git merge upstream/$UPSTREAM_DEFAULT_BRANCH --no-edit
+
+          # Push the updated branch to origin (your fork)
+          git push origin $UPSTREAM_DEFAULT_BRANCH
+
+          echo "Successfully synced fork with upstream"
+
+      - name: Sync tags from upstream
+        run: |
+          # Get list of tags that match our pattern
+          for tag in $(git tag -l | grep -E '^v2\.[2-9]|^v[3-9]' | sort -u); do
+            echo "Processing tag: $tag"
+            
+            # Check if tag already exists in origin
+            if git ls-remote --tags origin | grep -q "refs/tags/$tag$"; then
+              echo "Tag $tag already exists in origin, skipping"
+              continue
+            fi
+
+            # Get the actual commit that the tag points to (not the tag itself)
+            commit_hash=$(git rev-parse "$tag^{commit}")
+
+            # Create annotated tag locally and push
+            git tag -a "$tag" -m "Release $tag" "$commit_hash" -f
+            git push origin "$tag"
+            echo "Successfully synced tag: $tag"
+          done
