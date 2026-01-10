@@ -242,7 +242,7 @@ bencher = "0.1.5"
 bincode = "1.3.3"
 bitflags = { version = "2.10.0" }
 bitvec = { version = "1.0.1", features = ["serde"] }
-blake3 = "1.8.2"
+blake3 = "1.8.3"
 borsh = { version = "1.6.0", features = ["derive", "unstable__schema"] }
 bs58 = { version = "0.5.1", default-features = false }
 bv = "0.11.1"
@@ -602,8 +602,8 @@ spl-token-interface = "2.0.0"
 spl-token-metadata-interface = "0.8.0"
 static_assertions = "1.1.0"
 stream-cancel = "0.8.2"
-strum = "0.24"
-strum_macros = "0.24"
+strum = "0.27.2"
+strum_macros = "0.27.2"
 subtle = "2.6.1"
 symlink = "0.1.0"
 syn = "2.0"
