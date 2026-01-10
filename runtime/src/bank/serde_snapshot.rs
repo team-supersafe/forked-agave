@@ -14,8 +14,9 @@ mod tests {
         agave_snapshots::snapshot_config::SnapshotConfig,
         solana_accounts_db::{
             account_storage::AccountStorageMap,
+            account_storage_entry::AccountStorageEntry,
             accounts_db::{
-                get_temp_accounts_paths, AccountStorageEntry, AccountsDb, AtomicAccountsFileId,
+                get_temp_accounts_paths, AccountsDb, AtomicAccountsFileId,
                 ACCOUNTS_DB_CONFIG_FOR_TESTING,
             },
             accounts_file::{AccountsFile, AccountsFileError, StorageAccess},
@@ -344,7 +345,7 @@ mod tests {
         #[cfg_attr(
             feature = "frozen-abi",
             derive(AbiExample),
-            frozen_abi(digest = "6TVD4xhoKHV6mMFHotMJ2UMdraAffjmfVRHRZEJguzoC")
+            frozen_abi(digest = "368HqLKrMhTVTbue6c2SvgKmuzRGdvZUjNLFYL8BXBwj")
         )]
         #[derive(serde::Serialize)]
         pub struct BankAbiTestWrapper {

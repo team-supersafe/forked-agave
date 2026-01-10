@@ -835,7 +835,7 @@ impl ProgramTest {
             &Pubkey::new_unique(),
             None,
             bootstrap_validator_stake_lamports,
-            42,
+            890_880,
             fee_rate_governor,
             rent.clone(),
             ClusterType::Development,
