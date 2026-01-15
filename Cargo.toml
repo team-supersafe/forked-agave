@@ -250,7 +250,7 @@ caps = "0.5.6"
 cargo_metadata = "0.15.4"
 cfg-if = "1.0.4"
 cfg_eval = "0.1.2"
-chrono = { version = "0.4.42", default-features = false }
+chrono = { version = "0.4.43", default-features = false }
 chrono-humanize = "0.2.3"
 clap = "2.33.1"
 console = "0.16.2"
@@ -505,7 +505,6 @@ solana-program-test = { path = "program-test", version = "=4.0.0-alpha.0", featu
 solana-pubkey = { version = "4.0.0", default-features = false }
 solana-pubsub-client = { path = "pubsub-client", version = "=4.0.0-alpha.0" }
 solana-quic-client = { path = "quic-client", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
-solana-quic-definitions = "3.0.0"
 solana-rayon-threadlimit = { path = "rayon-threadlimit", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-remote-wallet = { path = "remote-wallet", version = "=4.0.0-alpha.0", default-features = false, features = ["agave-unstable-api"] }
 solana-rent = "3.0.0"
