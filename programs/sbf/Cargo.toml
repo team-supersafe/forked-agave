@@ -106,7 +106,7 @@ itertools = "0.14.0"
 libsecp256k1 = { version = "0.7.0", default-features = false }
 log = "0.4.11"
 miow = "0.6.1"
-net2 = "0.2.37"
+net2 = "0.2.39"
 num-derive = "0.4.2"
 num-traits = "0.2"
 rand = "0.8"
@@ -174,7 +174,7 @@ solana-transaction-status = { path = "../../transaction-status", version = "=4.0
 solana-vote = { path = "../../vote", version = "=4.0.0-alpha.0" }
 solana-vote-program = { path = "../../programs/vote", version = "=4.0.0-alpha.0" }
 test-case = "3.3.1"
-thiserror = "1.0"
+thiserror = "2.0"
 
 [features]
 sbf_c = []

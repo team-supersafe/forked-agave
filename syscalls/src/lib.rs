@@ -1588,6 +1588,18 @@ declare_builtin_function!(
             ALT_BN128_PAIRING_LE
         };
 
+        // SIMD-0284: Block LE ops if the feature is not active.
+        if !invoke_context.get_feature_set().alt_bn128_little_endian &&
+            matches!(
+                group_op,
+                ALT_BN128_G1_ADD_LE
+                    | ALT_BN128_G1_MUL_LE
+                    | ALT_BN128_PAIRING_LE
+            )
+        {
+            return Err(SyscallError::InvalidAttribute.into());
+        }
+
         let execution_cost = invoke_context.get_execution_cost();
         let (cost, output): (u64, usize) = match group_op {
             ALT_BN128_G1_ADD_BE | ALT_BN128_G1_ADD_LE => (
@@ -1638,11 +1650,7 @@ declare_builtin_function!(
                 alt_bn128_versioned_g1_addition(VersionedG1Addition::V0, input, Endianness::BE)
             }
             ALT_BN128_G1_ADD_LE => {
-                if invoke_context.get_feature_set().alt_bn128_little_endian {
-                    alt_bn128_versioned_g1_addition(VersionedG1Addition::V0, input, Endianness::LE)
-                } else {
-                    return Err(SyscallError::InvalidAttribute.into());
-                }
+                alt_bn128_versioned_g1_addition(VersionedG1Addition::V0, input, Endianness::LE)
             }
             ALT_BN128_G1_MUL_BE => {
                 alt_bn128_versioned_g1_multiplication(
@@ -1652,15 +1660,11 @@ declare_builtin_function!(
                 )
             }
             ALT_BN128_G1_MUL_LE => {
-                if invoke_context.get_feature_set().alt_bn128_little_endian {
-                    alt_bn128_versioned_g1_multiplication(
-                        VersionedG1Multiplication::V1,
-                        input,
-                        Endianness::LE
-                    )
-                } else {
-                    return Err(SyscallError::InvalidAttribute.into());
-                }
+                alt_bn128_versioned_g1_multiplication(
+                    VersionedG1Multiplication::V1,
+                    input,
+                    Endianness::LE
+                )
             }
             ALT_BN128_PAIRING_BE => {
                 let version = if invoke_context
@@ -1673,11 +1677,7 @@ declare_builtin_function!(
                 alt_bn128_versioned_pairing(version, input, Endianness::BE)
             }
             ALT_BN128_PAIRING_LE => {
-                if invoke_context.get_feature_set().alt_bn128_little_endian {
-                    alt_bn128_versioned_pairing(VersionedPairing::V1, input, Endianness::LE)
-                } else {
-                    return Err(SyscallError::InvalidAttribute.into());
-                }
+                alt_bn128_versioned_pairing(VersionedPairing::V1, input, Endianness::LE)
             }
             _ => {
                 return Err(SyscallError::InvalidAttribute.into());
@@ -1883,6 +1883,20 @@ declare_builtin_function!(
                 ALT_BN128_G1_DECOMPRESS_LE, ALT_BN128_G2_DECOMPRESS_LE,
             }
         };
+
+        // SIMD-0284: Block LE ops if the feature is not active.
+        if !invoke_context.get_feature_set().alt_bn128_little_endian &&
+            matches!(
+                op,
+                ALT_BN128_G1_COMPRESS_LE
+                    | ALT_BN128_G2_COMPRESS_LE
+                    | ALT_BN128_G1_DECOMPRESS_LE
+                    | ALT_BN128_G2_DECOMPRESS_LE
+            )
+        {
+            return Err(SyscallError::InvalidAttribute.into());
+        }
+
         let execution_cost = invoke_context.get_execution_cost();
         let base_cost = execution_cost.syscall_base_cost;
         let (cost, output): (u64, usize) = match op {
@@ -1927,14 +1941,10 @@ declare_builtin_function!(
                 call_result.copy_from_slice(&result_point);
             }
             ALT_BN128_G1_COMPRESS_LE => {
-                if invoke_context.get_feature_set().alt_bn128_little_endian {
-                    let Ok(result_point) = alt_bn128_g1_compress_le(input) else {
-                        return Ok(1);
-                    };
-                    call_result.copy_from_slice(&result_point);
-                } else {
-                    return Err(SyscallError::InvalidAttribute.into());
-                }
+                let Ok(result_point) = alt_bn128_g1_compress_le(input) else {
+                    return Ok(1);
+                };
+                call_result.copy_from_slice(&result_point);
             }
             ALT_BN128_G1_DECOMPRESS_BE => {
                 let Ok(result_point) = alt_bn128_g1_decompress(input) else {
@@ -1943,14 +1953,10 @@ declare_builtin_function!(
                 call_result.copy_from_slice(&result_point);
             }
             ALT_BN128_G1_DECOMPRESS_LE => {
-                if invoke_context.get_feature_set().alt_bn128_little_endian {
-                    let Ok(result_point) = alt_bn128_g1_decompress_le(input) else {
-                        return Ok(1);
-                    };
-                    call_result.copy_from_slice(&result_point);
-                } else {
-                    return Err(SyscallError::InvalidAttribute.into());
-                }
+                let Ok(result_point) = alt_bn128_g1_decompress_le(input) else {
+                    return Ok(1);
+                };
+                call_result.copy_from_slice(&result_point);
             }
             ALT_BN128_G2_COMPRESS_BE => {
                 let Ok(result_point) = alt_bn128_g2_compress(input) else {
@@ -1959,14 +1965,10 @@ declare_builtin_function!(
                 call_result.copy_from_slice(&result_point);
             }
             ALT_BN128_G2_COMPRESS_LE => {
-                if invoke_context.get_feature_set().alt_bn128_little_endian {
-                    let Ok(result_point) = alt_bn128_g2_compress_le(input) else {
-                        return Ok(1);
-                    };
-                    call_result.copy_from_slice(&result_point);
-                } else {
-                    return Err(SyscallError::InvalidAttribute.into());
-                }
+                let Ok(result_point) = alt_bn128_g2_compress_le(input) else {
+                    return Ok(1);
+                };
+                call_result.copy_from_slice(&result_point);
             }
             ALT_BN128_G2_DECOMPRESS_BE => {
                 let Ok(result_point) = alt_bn128_g2_decompress(input) else {
@@ -1975,14 +1977,10 @@ declare_builtin_function!(
                 call_result.copy_from_slice(&result_point);
             }
             ALT_BN128_G2_DECOMPRESS_LE => {
-                if invoke_context.get_feature_set().alt_bn128_little_endian {
-                    let Ok(result_point) = alt_bn128_g2_decompress_le(input) else {
-                        return Ok(1);
-                    };
-                    call_result.copy_from_slice(&result_point);
-                } else {
-                    return Err(SyscallError::InvalidAttribute.into());
-                }
+                let Ok(result_point) = alt_bn128_g2_decompress_le(input) else {
+                    return Ok(1);
+                };
+                call_result.copy_from_slice(&result_point);
             }
             _ => return Err(SyscallError::InvalidAttribute.into()),
         }
