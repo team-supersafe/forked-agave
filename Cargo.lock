@@ -75,6 +75,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "agave-bls12-381"
+version = "4.0.0-alpha.0"
+dependencies = [
+ "blst",
+ "blstrs",
+ "bytemuck",
+ "bytemuck_derive",
+ "criterion",
+ "group",
+ "hex-literal",
+ "pairing",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "solana-define-syscall 5.0.0",
+]
+
+[[package]]
 name = "agave-cargo-registry"
 version = "4.0.0-alpha.0"
 dependencies = [
@@ -3609,6 +3627,12 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hex-literal"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 
 [[package]]
 name = "hidapi"
@@ -7533,16 +7557,16 @@ dependencies = [
 
 [[package]]
 name = "solana-bn254"
-version = "3.1.2"
+version = "3.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d08583be08d2d5f19aa21efbb6fbdb968ba7fd0de74562441437a7d776772bf"
+checksum = "62ff13a8867fcc7b0f1114764e1bf6191b4551dcaf93729ddc676cd4ec6abc9f"
 dependencies = [
- "ark-bn254 0.4.0",
- "ark-ec 0.4.2",
- "ark-ff 0.4.2",
- "ark-serialize 0.4.2",
+ "ark-bn254 0.5.0",
+ "ark-ec 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
  "bytemuck",
- "solana-define-syscall 3.0.0",
+ "solana-define-syscall 5.0.0",
  "thiserror 2.0.18",
 ]
 

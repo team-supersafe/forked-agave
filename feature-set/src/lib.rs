@@ -178,6 +178,7 @@ impl FeatureSet {
             create_account_allow_prefund: self.is_active(&create_account_allow_prefund::id()),
             bls_pubkey_management_in_vote_account: self
                 .is_active(&bls_pubkey_management_in_vote_account::id()),
+            enable_alt_bn128_g2_syscalls: self.is_active(&enable_alt_bn128_g2_syscalls::id()),
         }
     }
 }
@@ -773,11 +774,11 @@ pub mod apply_cost_tracker_during_replay {
 }
 
 pub mod stricter_abi_and_runtime_constraints {
-    solana_pubkey::declare_id!("Eoh7e1sDqtyPtuiWAhBNSJinvtJWTTDgeUMRi3RF8zWS");
+    solana_pubkey::declare_id!("StricterAbiAndRuntimeConstraints11111111111");
 }
 
 pub mod account_data_direct_mapping {
-    solana_pubkey::declare_id!("6f2qai82RU7Dutj1WJfRzLJKYA36QWvTa89CR1imgj7N");
+    solana_pubkey::declare_id!("AccountDataDirectMapping1111111111111111111");
 }
 
 pub mod add_set_tx_loaded_accounts_data_size_instruction {
@@ -1222,6 +1223,10 @@ pub mod bls_pubkey_management_in_vote_account {
 
 pub mod relax_programdata_account_check_migration {
     solana_pubkey::declare_id!("rexav5eNTUSNT1K2N7cfRjnthwhcP5BC25v2tA4rW4h");
+}
+
+pub mod enable_alt_bn128_g2_syscalls {
+    solana_pubkey::declare_id!("bn1hKNURMGQaQoEVxahcEAcqiX3NwRs6hgKKNSLeKxH");
 }
 
 pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::new(|| {
@@ -2194,6 +2199,10 @@ pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::n
         (
             relax_programdata_account_check_migration::id(),
             "SIMD-0444: Relax program data account check in migration",
+        ),
+        (
+            enable_alt_bn128_g2_syscalls::id(),
+            "SIMD-302: Add alt_bn128 G2 syscalls",
         ),
         /*************** ADD NEW FEATURES HERE ***************/
     ]
