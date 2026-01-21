@@ -179,6 +179,7 @@ impl FeatureSet {
             bls_pubkey_management_in_vote_account: self
                 .is_active(&bls_pubkey_management_in_vote_account::id()),
             enable_alt_bn128_g2_syscalls: self.is_active(&enable_alt_bn128_g2_syscalls::id()),
+            commission_rate_in_basis_points: self.is_active(&commission_rate_in_basis_points::id()),
         }
     }
 }
@@ -1214,7 +1215,7 @@ pub mod replace_spl_token_with_p_token {
 }
 
 pub mod alt_bn128_little_endian {
-    solana_pubkey::declare_id!("bnS3pWfLrxHRJvMyLm6EaYQkP7A2Fe9DxoKv4aGA8YM");
+    solana_pubkey::declare_id!("bn2oPgpkzQPT3tohMaAsMVGjhDmmDa4jCaVPqCFmtxM");
 }
 
 pub mod bls_pubkey_management_in_vote_account {
@@ -1227,6 +1228,10 @@ pub mod relax_programdata_account_check_migration {
 
 pub mod enable_alt_bn128_g2_syscalls {
     solana_pubkey::declare_id!("bn1hKNURMGQaQoEVxahcEAcqiX3NwRs6hgKKNSLeKxH");
+}
+
+pub mod commission_rate_in_basis_points {
+    solana_pubkey::declare_id!("Eg7tXEwMZzS98xaZ1YHUbdRHsaYZiCsSaR6sKgxreoaj");
 }
 
 pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::new(|| {
@@ -2203,6 +2208,10 @@ pub static FEATURE_NAMES: LazyLock<AHashMap<Pubkey, &'static str>> = LazyLock::n
         (
             enable_alt_bn128_g2_syscalls::id(),
             "SIMD-302: Add alt_bn128 G2 syscalls",
+        ),
+        (
+            commission_rate_in_basis_points::id(),
+            "SIMD-0291: Commission rate in basis points",
         ),
         /*************** ADD NEW FEATURES HERE ***************/
     ]
