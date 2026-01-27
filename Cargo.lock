@@ -3044,7 +3044,7 @@ dependencies = [
  "getrandom 0.3.4",
  "libm",
  "rand 0.9.2",
- "siphasher 1.0.1",
+ "siphasher 1.0.2",
 ]
 
 [[package]]
@@ -5817,7 +5817,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls 0.23.36",
- "socket2 0.5.10",
+ "socket2 0.6.2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -7010,9 +7010,9 @@ checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
 
 [[package]]
 name = "siphasher"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+checksum = "b2aa850e253778c88a04c3d7323b043aeda9d3e30d5971937c1855769763678e"
 
 [[package]]
 name = "sized-chunks"
@@ -8937,7 +8937,7 @@ dependencies = [
  "serde-big-array",
  "serde_bytes",
  "serial_test",
- "siphasher 1.0.1",
+ "siphasher 1.0.2",
  "solana-bloom",
  "solana-clap-utils",
  "solana-client",
@@ -10577,9 +10577,9 @@ checksum = "dcf09694a0fc14e5ffb18f9b7b7c0f15ecb6eac5b5610bf76a1853459d19daf9"
 
 [[package]]
 name = "solana-sbpf"
-version = "0.14.1"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faf12cb3e7a3848f82ce69dd53ba543dd5c9231080b764dfd08a84d2618a79a1"
+checksum = "9a642316efc0f73abc02da804f391f98aefecfa885a1472e31e4eeed93d8d3f8"
 dependencies = [
  "byteorder",
  "combine 3.8.1",
@@ -11022,12 +11022,12 @@ dependencies = [
 name = "solana-svm"
 version = "4.0.0-alpha.0"
 dependencies = [
- "agave-logger",
  "agave-syscalls",
  "ahash 0.8.12",
  "assert_matches",
  "bincode",
  "ed25519-dalek 1.0.1",
+ "env_logger",
  "libsecp256k1",
  "log",
  "openssl",
@@ -11151,10 +11151,10 @@ name = "solana-svm-test-harness-instr"
 version = "4.0.0-alpha.0"
 dependencies = [
  "agave-feature-set",
- "agave-logger",
  "agave-precompiles",
  "agave-syscalls",
  "bincode",
+ "env_logger",
  "prost",
  "solana-account",
  "solana-builtins",
@@ -11248,7 +11248,6 @@ dependencies = [
 name = "solana-system-program"
 version = "4.0.0-alpha.0"
 dependencies = [
- "agave-feature-set",
  "assert_matches",
  "bincode",
  "criterion",
