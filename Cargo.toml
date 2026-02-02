@@ -243,7 +243,7 @@ borsh = { version = "1.6.0", features = ["derive", "unstable__schema"] }
 bs58 = { version = "0.5.1", default-features = false }
 bv = "0.11.1"
 byte-unit = "4.0.19"
-bytemuck = "1.24.0"
+bytemuck = "1.25.0"
 bytemuck_derive = "1.10.2"
 bytes = "1.11"
 bzip2 = "0.6.1"
@@ -374,7 +374,7 @@ reqwest = { version = "0.12.28", default-features = false }
 reqwest-middleware = "0.4.2"
 rolling-file = "0.2.0"
 rpassword = "7.4"
-rts-alloc = { version = "1.0.0" }
+rts-alloc = { version = "2.0.0" }
 rustls = { version = "0.23.36", features = ["std"], default-features = false }
 scopeguard = "1.2.0"
 semver = "1.0.27"
@@ -397,7 +397,7 @@ smallvec = { version = "1.15.1", default-features = false, features = ["union"] 
 smpl_jwt = "0.7.1"
 socket2 = "0.6.2"
 soketto = "0.8"
-solana-account = "3.3.0"
+solana-account = "3.4.0"
 solana-account-decoder = { path = "account-decoder", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-account-decoder-client-types = { path = "account-decoder-client-types", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-account-info = "3.1.0"
@@ -450,7 +450,7 @@ solana-epoch-rewards-hasher = "3.1.0"
 solana-epoch-schedule = "3.0.0"
 solana-example-mocks = "3.0.0"
 solana-faucet = { path = "faucet", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
-solana-feature-gate-interface = "3.0.0"
+solana-feature-gate-interface = "3.1.0"
 solana-fee = { path = "fee", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-fee-calculator = "3.0.0"
 solana-fee-structure = "3.0.0"
