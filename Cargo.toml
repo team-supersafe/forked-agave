@@ -11,6 +11,7 @@ members = [
     "banks-server",
     "bench-streamer",
     "bloom",
+    "bls-cert-verify",
     "bls12-381",
     "bucket_map",
     "builtins",
@@ -137,10 +138,6 @@ members = [
 ]
 
 exclude = [
-    # solana-dos depends on bench-tps. ignore bench-tps here to avoid confusing cargo's
-    # workspace resolution logic, which expects it in the top-level worspace rather than
-    # dev-bins
-    "bench-tps",
     "ci/xtask",
     "dev-bins",
     "programs/sbf",
@@ -192,6 +189,7 @@ used_underscore_binding = "deny"
 [workspace.dependencies]
 Inflector = "0.11.4"
 agave-banking-stage-ingress-types = { path = "banking-stage-ingress-types", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
+agave-bls-cert-verify = { path = "bls-cert-verify", features = ["agave-unstable-api"] }
 agave-bls12-381 = { path = "bls12-381", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 agave-feature-set = { path = "feature-set", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 agave-fs = { path = "fs", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
@@ -477,7 +475,7 @@ solana-loader-v4-program = { path = "programs/loader-v4", version = "=4.0.0-alph
 solana-local-cluster = { path = "local-cluster", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-measure = { path = "measure", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-merkle-tree = { path = "merkle-tree", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
-solana-message = "3.0.1"
+solana-message = "3.1.0"
 solana-metrics = { path = "metrics", version = "=4.0.0-alpha.0", features = ["agave-unstable-api"] }
 solana-msg = "3.0.0"
 solana-native-token = "3.0.0"
