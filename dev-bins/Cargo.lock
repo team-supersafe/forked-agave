@@ -6985,7 +6985,6 @@ dependencies = [
  "solana-version",
  "solana-vote",
  "solana-vote-program",
- "solana-wen-restart",
  "static_assertions",
  "strum",
  "strum_macros",
@@ -9857,36 +9856,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solana-wen-restart"
-version = "4.0.0-alpha.0"
-dependencies = [
- "agave-snapshots",
- "agave-votor-messages",
- "anyhow",
- "log",
- "prost",
- "prost-build",
- "prost-types",
- "protobuf-src",
- "rayon",
- "solana-clock",
- "solana-entry",
- "solana-genesis-utils",
- "solana-gossip",
- "solana-hash 4.1.0",
- "solana-ledger",
- "solana-net-utils",
- "solana-pubkey 4.0.0",
- "solana-runtime",
- "solana-shred-version",
- "solana-svm-timings",
- "solana-time-utils",
- "solana-vote",
- "solana-vote-interface",
- "solana-vote-program",
-]
-
-[[package]]
 name = "solana-zk-elgamal-proof-program"
 version = "4.0.0-alpha.0"
 dependencies = [
@@ -9898,7 +9867,7 @@ dependencies = [
  "solana-program-runtime",
  "solana-sdk-ids",
  "solana-svm-log-collector",
- "solana-zk-sdk 5.0.0",
+ "solana-zk-sdk 5.0.1",
 ]
 
 [[package]]
@@ -9940,9 +9909,9 @@ dependencies = [
 
 [[package]]
 name = "solana-zk-sdk"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d89042b5867c7440526d47085db2cd11a7ae557461a4f41a3b3a569799dd9d6"
+checksum = "09670ff59f60e6ddc2209c2e4353992a9b9f01d4e244f3e9d67bd5146e33d388"
 dependencies = [
  "aes-gcm-siv",
  "base64 0.22.1",

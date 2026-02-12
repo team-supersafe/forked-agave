@@ -7621,7 +7621,7 @@ dependencies = [
  "solana-signature",
  "solana-signer",
  "solana-system-interface 3.0.0",
- "solana-zk-sdk 5.0.0",
+ "solana-zk-sdk 5.0.1",
  "tempfile",
  "thiserror 2.0.18",
  "tiny-bip39",
@@ -8181,7 +8181,6 @@ dependencies = [
  "solana-version",
  "solana-vote",
  "solana-vote-program",
- "solana-wen-restart",
  "spl-memo-interface",
  "static_assertions",
  "strum",
@@ -11821,44 +11820,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solana-wen-restart"
-version = "4.0.0-alpha.0"
-dependencies = [
- "agave-logger",
- "agave-snapshots",
- "agave-votor-messages",
- "anyhow",
- "assert_matches",
- "crossbeam-channel",
- "log",
- "prost",
- "prost-build",
- "prost-types",
- "protobuf-src",
- "rand 0.9.2",
- "rayon",
- "serial_test",
- "solana-clock",
- "solana-entry",
- "solana-genesis-utils",
- "solana-gossip",
- "solana-hash 4.1.0",
- "solana-keypair",
- "solana-ledger",
- "solana-net-utils",
- "solana-pubkey 4.0.0",
- "solana-runtime",
- "solana-shred-version",
- "solana-signer",
- "solana-svm-timings",
- "solana-time-utils",
- "solana-vote",
- "solana-vote-interface",
- "solana-vote-program",
- "tempfile",
-]
-
-[[package]]
 name = "solana-zk-elgamal-proof-program"
 version = "4.0.0-alpha.0"
 dependencies = [
@@ -11872,7 +11833,7 @@ dependencies = [
  "solana-program-runtime",
  "solana-sdk-ids",
  "solana-svm-log-collector",
- "solana-zk-sdk 5.0.0",
+ "solana-zk-sdk 5.0.1",
 ]
 
 [[package]]
@@ -11891,7 +11852,7 @@ dependencies = [
  "solana-system-interface 3.0.0",
  "solana-transaction",
  "solana-transaction-error",
- "solana-zk-sdk 5.0.0",
+ "solana-zk-sdk 5.0.1",
 ]
 
 [[package]]
@@ -11933,9 +11894,9 @@ dependencies = [
 
 [[package]]
 name = "solana-zk-sdk"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d89042b5867c7440526d47085db2cd11a7ae557461a4f41a3b3a569799dd9d6"
+checksum = "09670ff59f60e6ddc2209c2e4353992a9b9f01d4e244f3e9d67bd5146e33d388"
 dependencies = [
  "aes-gcm-siv",
  "base64 0.22.1",
