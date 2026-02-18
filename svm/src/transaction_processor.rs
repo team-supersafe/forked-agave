@@ -904,8 +904,11 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
             } else if missing_programs.is_empty() {
                 break;
             } else {
-                // Sleep until the next finish_cooperative_loading_task() call.
-                // Once a task completes we'll wake up and try to load the
+                // Remember: there are multiple transaction processor threads running concurrently
+                // and those other threads may be loading this or other programs.
+                //
+                // So, sleep until some other thread submits a program with their
+                // `finish_cooperative_loading_task` call. We'll then wake up and try to load the
                 // missing programs inside the tx batch again.
                 let _new_cookie = task_waiter.wait(task_cookie);
             }
@@ -1369,7 +1372,11 @@ mod tests {
             }
             if stack_height > transaction_context.get_instruction_stack_height() {
                 transaction_context
-                    .configure_next_instruction_for_tests(0, vec![], vec![index_in_trace as u8])
+                    .configure_top_level_instruction_for_tests(
+                        0,
+                        vec![],
+                        vec![index_in_trace as u8],
+                    )
                     .unwrap();
                 transaction_context.push().unwrap();
             }
