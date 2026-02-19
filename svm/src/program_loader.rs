@@ -460,7 +460,7 @@ mod tests {
         let mut metrics = LoadProgramMetrics::default();
         let loader = bpf_loader_upgradeable::id();
         let size = buffer.len();
-        let slot = 2;
+        let slot: Slot = 2;
         let environment = ProgramRuntimeEnvironment::new(BuiltinProgram::new_mock());
 
         let result = ProgramCacheEntry::new(

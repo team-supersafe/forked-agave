@@ -564,6 +564,7 @@ dependencies = [
  "solana-frozen-abi-macro",
  "solana-hash 4.2.0",
  "solana-pubkey 4.0.0",
+ "solana-signer-store",
  "tempfile",
  "thiserror 2.0.18",
  "wincode 0.4.4",
@@ -8802,7 +8803,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "solana-gossip-bin"
+name = "solana-gossip-cli"
 version = "4.0.0-alpha.0"
 dependencies = [
  "agave-logger",

@@ -181,7 +181,6 @@ const WAIT_FOR_SUPERMAJORITY_THRESHOLD_PERCENT: u64 = 80;
 #[derive(Clone, EnumCount, EnumIter, EnumString, VariantNames, Default, IntoStaticStr, Display)]
 #[strum(serialize_all = "kebab-case")]
 pub enum BlockVerificationMethod {
-    BlockstoreProcessor,
     #[default]
     UnifiedScheduler,
 }
@@ -325,10 +324,6 @@ pub fn supported_scheduling_mode(
         (BlockVerificationMethod::UnifiedScheduler, _) => {
             SupportedSchedulingMode::Either(SchedulingMode::BlockVerification)
         }
-        (_, BlockProductionMethod::UnifiedScheduler) => {
-            SupportedSchedulingMode::Either(SchedulingMode::BlockProduction)
-        }
-        _ => unreachable!("seems unified scheduler is disabled"),
     }
 }
 
@@ -1105,8 +1100,7 @@ impl Validator {
             &config.block_verification_method,
             &config.block_production_method,
         ) {
-            methods @ (BlockVerificationMethod::UnifiedScheduler, _)
-            | methods @ (_, BlockProductionMethod::UnifiedScheduler) => {
+            methods @ (BlockVerificationMethod::UnifiedScheduler, _) => {
                 let scheduler_pool = DefaultSchedulerPool::new(
                     supported_scheduling_mode(methods),
                     config.unified_scheduler_handler_threads,
@@ -1127,15 +1121,6 @@ impl Validator {
                     .write()
                     .unwrap()
                     .install_scheduler_pool(scheduler_pool);
-            }
-            _ => {
-                info!("no scheduler pool is installed for block verification/production...");
-                if let Some(count) = config.unified_scheduler_handler_threads {
-                    warn!(
-                        "--unified-scheduler-handler-threads={count} is ignored because unified \
-                         scheduler isn't enabled"
-                    );
-                }
             }
         }
 
@@ -2235,23 +2220,9 @@ fn load_blockstore(
     info!("loading ledger from {ledger_path:?}...");
     *start_progress.write().unwrap() = ValidatorStartProgress::LoadingLedger;
 
-    let blockstore = Blockstore::open_with_options(ledger_path, config.blockstore_options.clone())
-        .map_err(|err| format!("Failed to open Blockstore: {err:?}"))?;
-
-    let (ledger_signal_sender, ledger_signal_receiver) = bounded(MAX_REPLAY_WAKE_UP_SIGNALS);
-    blockstore.add_new_shred_signal(ledger_signal_sender);
-
-    // following boot sequence (esp BankForks) could set root. so stash the original value
-    // of blockstore root away here as soon as possible.
-    let original_blockstore_root = blockstore.max_root();
-
-    let blockstore = Arc::new(blockstore);
-    let blockstore_root_scan = BlockstoreRootScan::new(config, blockstore.clone(), exit.clone());
-    let halt_at_slot = blockstore.highest_slot().unwrap_or(None);
-
-    let process_options = blockstore_processor::ProcessOptions {
+    let mut process_options = blockstore_processor::ProcessOptions {
         run_verification: config.run_verification,
-        halt_at_slot,
+        halt_at_slot: None,
         new_hard_forks: config.new_hard_forks.clone(),
         debug_keys: config.debug_keys.clone(),
         accounts_db_config: config.accounts_db_config.clone(),
@@ -2261,6 +2232,33 @@ fn load_blockstore(
         use_snapshot_archives_at_startup: config.use_snapshot_archives_at_startup,
         ..blockstore_processor::ProcessOptions::default()
     };
+
+    let (blockstore, bank_from_snapshot_opt) = thread::scope(|scope| {
+        let load_snapshot_handle = thread::Builder::new()
+            .name("solBnkFrkSnap".into())
+            .spawn_scoped(scope, || {
+                bank_forks_utils::try_load_bank_forks_from_snapshot(
+                    genesis_config,
+                    &config.account_paths,
+                    &config.snapshot_config,
+                    &process_options,
+                    accounts_update_notifier.clone(),
+                    exit.clone(),
+                )
+            })
+            .expect("should spawn thread");
+        let blockstore =
+            Blockstore::open_with_options(ledger_path, config.blockstore_options.clone())
+                .map_err(|err| format!("Failed to open Blockstore: {err:?}"))?;
+        let bank_from_snapshot_result = load_snapshot_handle.join().expect("join thread");
+
+        Ok::<_, String>((Arc::new(blockstore), bank_from_snapshot_result.transpose()))
+    })?;
+
+    // following boot sequence (esp BankForks) could set root. so stash the original value
+    // of blockstore root away here as soon as possible.
+    let original_blockstore_root = blockstore.max_root();
+    process_options.halt_at_slot = blockstore.highest_slot().unwrap_or(None);
 
     let enable_rpc_transaction_history =
         config.rpc_addrs.is_some() && config.rpc_config.enable_rpc_transaction_history;
@@ -2282,22 +2280,24 @@ fn load_blockstore(
     let entry_notifier_service = entry_notifier
         .map(|entry_notifier| EntryNotifierService::new(entry_notifier, exit.clone()));
 
-    let (bank_forks, starting_snapshot_hashes) = bank_forks_utils::load_bank_forks(
-        genesis_config,
-        &blockstore,
-        config.account_paths.clone(),
-        &config.snapshot_config,
-        &process_options,
-        transaction_history_services
-            .transaction_status_sender
-            .as_ref(),
-        entry_notifier_service
-            .as_ref()
-            .map(|service| service.sender()),
-        accounts_update_notifier,
-        exit,
-    )
-    .map_err(|err| err.to_string())?;
+    let (bank_forks, starting_snapshot_hashes) = bank_from_snapshot_opt
+        .unwrap_or_else(|| {
+            bank_forks_utils::load_bank_forks_from_genesis(
+                genesis_config,
+                &blockstore,
+                config.account_paths.clone(),
+                &process_options,
+                transaction_history_services
+                    .transaction_status_sender
+                    .as_ref(),
+                entry_notifier_service
+                    .as_ref()
+                    .map(|service| service.sender()),
+                accounts_update_notifier,
+                exit.clone(),
+            )
+        })
+        .map_err(|err| err.to_string())?;
 
     let mut leader_schedule_cache =
         LeaderScheduleCache::new_from_bank(&bank_forks.read().unwrap().root_bank());
@@ -2310,6 +2310,10 @@ fn load_blockstore(
     // is processing the dropped banks from the `pruned_banks_receiver` channel.
     let pruned_banks_receiver =
         AccountsBackgroundService::setup_bank_drop_callback(bank_forks.clone());
+
+    let blockstore_root_scan = BlockstoreRootScan::new(config, blockstore.clone(), exit);
+    let (ledger_signal_sender, ledger_signal_receiver) = bounded(MAX_REPLAY_WAKE_UP_SIGNALS);
+    blockstore.add_new_shred_signal(ledger_signal_sender);
 
     Ok((
         bank_forks,
