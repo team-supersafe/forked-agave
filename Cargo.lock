@@ -4311,9 +4311,9 @@ dependencies = [
 
 [[package]]
 name = "keccak"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecc2af9a1119c51f12a14607e783cb977bde58bc069ff0c3da1095e635d70654"
+checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
 dependencies = [
  "cpufeatures",
 ]
@@ -7370,9 +7370,9 @@ dependencies = [
 
 [[package]]
 name = "solana-borsh"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc402b16657abbfa9991cd5cbfac5a11d809f7e7d28d3bb291baeb088b39060e"
+checksum = "be4a37fc44f0633779a619840b5117c2a895996cec57eb3dc10597fac7867875"
 dependencies = [
  "borsh",
 ]
@@ -7847,9 +7847,9 @@ dependencies = [
 
 [[package]]
 name = "solana-commitment-config"
-version = "3.1.0"
+version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e41a3917076a8b5375809078ae3a6fb76a53e364b596ef8c4265e7f410876f3"
+checksum = "1517aa49dcfa9cb793ef90e7aac81346d62ca4a546bb1a754030a033e3972e1c"
 dependencies = [
  "serde",
  "serde_derive",
