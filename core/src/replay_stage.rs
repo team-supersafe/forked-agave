@@ -58,8 +58,9 @@ use {
         block_error::BlockError,
         blockstore::Blockstore,
         blockstore_processor::{
-            self, BlockstoreProcessorError, ConfirmationProgress, ExecuteBatchesInternalMetrics,
-            ReplaySlotStats, TransactionStatusSender,
+            self, check_chained_block_id, BlockstoreProcessorError, ChainedBlockIdCheck,
+            ConfirmationProgress, ExecuteBatchesInternalMetrics, ReplaySlotStats,
+            TransactionStatusSender,
         },
         entry_notifier_service::EntryNotifierSender,
         leader_schedule_cache::LeaderScheduleCache,
@@ -3254,6 +3255,28 @@ impl ReplayStage {
                     num_dropped_blocks_on_fork,
                 )
             });
+
+            // Check if the child block's chained merkle root chains to the parent's block id.
+            // It's important that we do this here (after we have a bank) rather than failing
+            // in generate_new_bank_forks, as we need a bank to mark as dead in order to kick off
+            // ancestor hashes service / duplicate block repair.
+            match check_chained_block_id(blockstore, &bank) {
+                ChainedBlockIdCheck::Inactive | ChainedBlockIdCheck::Pass => (),
+                ChainedBlockIdCheck::Unavailable => {
+                    // Missing shred 0, can't replay anyway
+                    return replay_result;
+                }
+                ChainedBlockIdCheck::Mismatch => {
+                    // Mismatch, mark dead and don't replay
+                    replay_result.is_slot_dead = true;
+                    replay_result.replay_result =
+                        Some(Err(BlockstoreProcessorError::ChainedBlockIdFailure(
+                            bank.slot(),
+                            bank.parent_slot(),
+                        )));
+                    return replay_result;
+                }
+            }
 
             if bank.leader_id() != my_pubkey {
                 let mut replay_blockstore_time = Measure::start("replay_blockstore_into_bank");
