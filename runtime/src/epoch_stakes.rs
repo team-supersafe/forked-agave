@@ -36,7 +36,7 @@ pub struct BLSPubkeyStakeEntry {
 pub struct BLSPubkeyToRankMap {
     /// Mapping from validator [`BLSPubkey`] to rank.
     rank_map: HashMap<BLSPubkey, u16>,
-    /// Mapping from rank to validator [`(Pubkey, BLSPubkey)`].
+    /// Mapping from rank to [`BLSPubkeyStakeEntry`].
     //
     // TODO(wen): We can make sorted_pubkeys a Vec<BLSPubkey> after we remove ed25519
     // pubkey from the consensus pool.

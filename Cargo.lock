@@ -10194,6 +10194,7 @@ dependencies = [
 name = "solana-runtime"
 version = "4.0.0-alpha.0"
 dependencies = [
+ "agave-bls-cert-verify",
  "agave-feature-set",
  "agave-fs",
  "agave-logger",
@@ -10337,6 +10338,7 @@ dependencies = [
  "tempfile",
  "test-case",
  "thiserror 2.0.18",
+ "wincode",
 ]
 
 [[package]]

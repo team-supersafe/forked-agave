@@ -51,6 +51,7 @@ frozen-abi = [
 shuttle-test = ["dep:shuttle"]
 
 [dependencies]
+agave-bls-cert-verify = { workspace = true }
 agave-feature-set = { workspace = true }
 agave-fs = { workspace = true }
 agave-precompiles = { workspace = true }
@@ -188,6 +189,7 @@ strum_macros = { workspace = true }
 symlink = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
+wincode = { workspace = true }
 
 [dev-dependencies]
 agave-logger = { workspace = true }
