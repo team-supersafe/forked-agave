@@ -3211,34 +3211,47 @@ fn test_load_with_read_only_accounts_cache() {
 
     assert_eq!(db.read_only_accounts_cache.cache_len(), 0);
     let (account, slot) = db
-        .load_account_with(&Ancestors::default(), &account_key, false)
+        .load_account_with(
+            &Ancestors::default(),
+            &account_key,
+            PopulateReadCache::False,
+        )
         .unwrap();
     assert_eq!(account.lamports(), 1);
     assert_eq!(db.read_only_accounts_cache.cache_len(), 0);
     assert_eq!(slot, 1);
 
     let (account, slot) = db
-        .load_account_with(&Ancestors::default(), &account_key, true)
+        .load_account_with(&Ancestors::default(), &account_key, PopulateReadCache::True)
         .unwrap();
     assert_eq!(account.lamports(), 1);
     assert_eq!(db.read_only_accounts_cache.cache_len(), 1);
     assert_eq!(slot, 1);
 
     db.store_for_tests((2, &[(&account_key, &zero_lamport_account)][..]));
-    let account = db.load_account_with(&Ancestors::default(), &account_key, false);
+    let account = db.load_account_with(
+        &Ancestors::default(),
+        &account_key,
+        PopulateReadCache::False,
+    );
     assert!(account.is_none());
     assert_eq!(db.read_only_accounts_cache.cache_len(), 1);
 
     db.read_only_accounts_cache.reset_for_tests();
     assert_eq!(db.read_only_accounts_cache.cache_len(), 0);
-    let account = db.load_account_with(&Ancestors::default(), &account_key, true);
+    let account =
+        db.load_account_with(&Ancestors::default(), &account_key, PopulateReadCache::True);
     assert!(account.is_none());
     assert_eq!(db.read_only_accounts_cache.cache_len(), 0);
 
     let slot2_account = AccountSharedData::new(2, 1, AccountSharedData::default().owner());
     db.store_for_tests((2, &[(&account_key, &slot2_account)][..]));
     let (account, slot) = db
-        .load_account_with(&Ancestors::default(), &account_key, false)
+        .load_account_with(
+            &Ancestors::default(),
+            &account_key,
+            PopulateReadCache::False,
+        )
         .unwrap();
     assert_eq!(account.lamports(), 2);
     assert_eq!(db.read_only_accounts_cache.cache_len(), 0);
@@ -3247,7 +3260,7 @@ fn test_load_with_read_only_accounts_cache() {
     let slot2_account = AccountSharedData::new(2, 1, AccountSharedData::default().owner());
     db.store_for_tests((2, &[(&account_key, &slot2_account)][..]));
     let (account, slot) = db
-        .load_account_with(&Ancestors::default(), &account_key, true)
+        .load_account_with(&Ancestors::default(), &account_key, PopulateReadCache::True)
         .unwrap();
     assert_eq!(account.lamports(), 2);
     // The account shouldn't be added to read_only_cache because it is in write_cache.
@@ -3280,6 +3293,7 @@ fn test_flush_cache_clean() {
             Some(0),
             LoadHint::Unspecified,
             LoadZeroLamports::SomeWithZeroLamportAccountForTests,
+            PopulateReadCache::True,
         )
         .unwrap();
     assert_eq!(account.0.lamports(), 1);
@@ -3296,7 +3310,8 @@ fn test_flush_cache_clean() {
             &account_key,
             Some(0),
             LoadHint::Unspecified,
-            LOAD_ZERO_LAMPORTS_ANY_TESTS
+            LOAD_ZERO_LAMPORTS_ANY_TESTS,
+            PopulateReadCache::True,
         )
         .is_none());
 }
@@ -3378,6 +3393,7 @@ fn test_flush_cache_dont_clean_zero_lamport_account(mark_obsolete_accounts: Mark
             max_root,
             load_hint,
             LoadZeroLamports::SomeWithZeroLamportAccountForTests,
+            PopulateReadCache::True,
         )
         .unwrap()
         .0
@@ -3519,6 +3535,7 @@ fn test_scan_flush_accounts_cache_then_clean_drop() {
             Some(0),
             LoadHint::Unspecified,
             LoadZeroLamports::SomeWithZeroLamportAccountForTests,
+            PopulateReadCache::True,
         )
         .unwrap();
     assert_eq!(account.0.lamports(), slot0_account.lamports());
@@ -3533,6 +3550,7 @@ fn test_scan_flush_accounts_cache_then_clean_drop() {
             Some(max_scan_root),
             LoadHint::Unspecified,
             LOAD_ZERO_LAMPORTS_ANY_TESTS,
+            PopulateReadCache::True,
         )
         .unwrap();
     assert_eq!(account.0.lamports(), slot1_account.lamports());
@@ -3548,6 +3566,7 @@ fn test_scan_flush_accounts_cache_then_clean_drop() {
             Some(max_scan_root),
             LoadHint::Unspecified,
             LOAD_ZERO_LAMPORTS_ANY_TESTS,
+            PopulateReadCache::True,
         )
         .unwrap();
     assert_eq!(account.0.lamports(), slot1_account.lamports());
@@ -3561,7 +3580,8 @@ fn test_scan_flush_accounts_cache_then_clean_drop() {
             &account_key,
             Some(max_scan_root),
             LoadHint::Unspecified,
-            LOAD_ZERO_LAMPORTS_ANY_TESTS
+            LOAD_ZERO_LAMPORTS_ANY_TESTS,
+            PopulateReadCache::True
         )
         .is_none());
 }
@@ -3781,7 +3801,8 @@ fn test_accounts_db_cache_clean_dead_slots() {
                 key,
                 Some(last_dead_slot),
                 LoadHint::Unspecified,
-                LOAD_ZERO_LAMPORTS_ANY_TESTS
+                LOAD_ZERO_LAMPORTS_ANY_TESTS,
+                PopulateReadCache::True
             )
             .is_some());
     }
@@ -3803,7 +3824,8 @@ fn test_accounts_db_cache_clean_dead_slots() {
                 key,
                 Some(last_dead_slot),
                 LoadHint::Unspecified,
-                LOAD_ZERO_LAMPORTS_ANY_TESTS
+                LOAD_ZERO_LAMPORTS_ANY_TESTS,
+                PopulateReadCache::True
             )
             .is_none());
     }
@@ -4348,6 +4370,7 @@ fn start_load_thread(
                         None,
                         load_hint,
                         LOAD_ZERO_LAMPORTS_ANY_TESTS,
+                        PopulateReadCache::True,
                     )
                     .unwrap();
                 // slot + 1 == account.lamports because of the account-cache-flush thread
@@ -4655,7 +4678,8 @@ fn test_cache_flush_remove_unrooted_race_multiple_slots() {
                 .load(
                     &Ancestors::from(vec![(*slot, 0)]),
                     &account_in_slot,
-                    LoadHint::FixedMaxRoot
+                    LoadHint::FixedMaxRoot,
+                    PopulateReadCache::True,
                 )
                 .is_some());
             // Clear for next iteration so that `assert!(self.storage.get_slot_storage_entry(purged_slot).is_none());`
@@ -6612,6 +6636,7 @@ fn test_new_zero_lamport_accounts_skipped() {
     accounts_db.store_accounts_unfrozen(
         (slot, [(&pubkey1, &zero_account)].as_slice()),
         UpdateIndexThreadSelection::Inline,
+        None,
     );
     assert!(!accounts_db.accounts_index.contains(&pubkey1));
     assert!(accounts_db.accounts_cache.slot_cache(slot).is_none());
@@ -6630,6 +6655,7 @@ fn test_new_zero_lamport_accounts_skipped() {
             .as_slice(),
         ),
         UpdateIndexThreadSelection::Inline,
+        None,
     );
     assert!(!accounts_db.accounts_index.contains(&pubkey1));
     assert!(!accounts_db
@@ -6655,6 +6681,7 @@ fn test_new_zero_lamport_accounts_skipped() {
     accounts_db.store_accounts_unfrozen(
         (slot, [(&pubkey2, &zero_account)].as_slice()),
         UpdateIndexThreadSelection::Inline,
+        None,
     );
     assert!(accounts_db.accounts_index.contains(&pubkey2));
     assert!(accounts_db
@@ -6682,6 +6709,7 @@ fn test_new_zero_lamport_accounts_skipped() {
     accounts_db.store_accounts_unfrozen(
         (slot, [(&pubkey1, &account)].as_slice()),
         UpdateIndexThreadSelection::Inline,
+        None,
     );
     assert!(accounts_db.accounts_index.contains(&pubkey1));
 
@@ -6690,6 +6718,7 @@ fn test_new_zero_lamport_accounts_skipped() {
     accounts_db.store_accounts_unfrozen(
         (slot, [(&pubkey3, &zero_account)].as_slice()),
         UpdateIndexThreadSelection::Inline,
+        None,
     );
     accounts_db.add_root_and_flush_write_cache(slot);
 
@@ -6711,35 +6740,36 @@ enum InitialState {
     WithoutLamports,
 }
 
-#[test_case(InitialState::None, vec![0], None, 1, 0;
+#[test_case(InitialState::None, vec![0], None, 1, 0, 0;
     "store_single_zero_lamport")]
-#[test_case(InitialState::None, vec![100, 200, 300], Some(300), 0, 2;
+#[test_case(InitialState::None, vec![100, 200, 300], Some(300), 0, 0, 2;
 "store_multiple_duplicates_some_lamports")]
-#[test_case(InitialState::None, vec![11, 0, 12, 0], None, 1, 3;
+#[test_case(InitialState::None, vec![11, 0, 12, 0], None, 1, 0, 3;
     "store_mixed_accounts_ending_with_zero_lamports")]
-#[test_case(InitialState::None, vec![0, 5, 0, 10], Some(10), 0, 3;
+#[test_case(InitialState::None, vec![0, 5, 0, 10], Some(10), 0, 0, 3;
 "store_mixed_accounts_ending_with_nonzero_lamports")]
-#[test_case(InitialState::WithLamports(10), vec![0], Some(0), 0, 0;
+#[test_case(InitialState::WithLamports(10), vec![0], Some(0), 0, 0, 0;
 "overwrite_existing_account_with_zero_lamports")]
-#[test_case(InitialState::WithLamports(50), vec![101, 102, 103], Some(103), 0, 2;
+#[test_case(InitialState::WithLamports(50), vec![101, 102, 103], Some(103), 0, 0, 2;
 "overwrite_existing_account_with_duplicate_some_lamports")]
-#[test_case(InitialState::WithLamports(50), vec![0, 5, 0, 10], Some(10), 0, 3;
+#[test_case(InitialState::WithLamports(50), vec![0, 5, 0, 10], Some(10), 0, 0, 3;
 "overwrite_existing_account_mixed_ending_some_lamports")]
-#[test_case(InitialState::WithLamports(50), vec![11, 0, 12, 0], Some(0), 0, 3;
+#[test_case(InitialState::WithLamports(50), vec![11, 0, 12, 0], Some(0), 0, 0, 3;
 "overwrite_existing_account_mixed_ending_zero_lamports")]
-#[test_case(InitialState::WithoutLamports, vec![0], Some(0), 0, 0;
+#[test_case(InitialState::WithoutLamports, vec![0], Some(0), 0, 1, 0;
 "overwrite_zero_lamport_account_with_zero_lamports")]
-#[test_case(InitialState::WithoutLamports, vec![5], Some(5), 0, 0;
+#[test_case(InitialState::WithoutLamports, vec![5], Some(5), 0, 0, 0;
 "overwrite_zero_lamport_account_with_some_lamports")]
-#[test_case(InitialState::WithoutLamports, vec![0, 10, 0, 15], Some(15), 0, 3;
+#[test_case(InitialState::WithoutLamports, vec![0, 10, 0, 15], Some(15), 0, 0, 3;
 "overwrite_zero_lamport_account_mixed_ending_some_lamports")]
-#[test_case(InitialState::WithoutLamports, vec![12, 0, 25, 0], Some(0),0, 3;
-"overwrite_zero_lamport_account__mixed_ending_zero_lamports")]
+#[test_case(InitialState::WithoutLamports, vec![12, 0, 25, 0], Some(0), 0, 1, 3;
+"overwrite_zero_lamport_account_mixed_ending_zero_lamports")]
 fn test_write_accounts_to_cache_scenarios(
     initial_state: InitialState,
     batch_accounts: Vec<u64>,
     expected_lamports: Option<u64>,
     expected_ephemeral_skips: u64,
+    expected_ancestors_skips: u64,
     expected_duplicate_skips: u64,
 ) {
     let db = AccountsDb::new_single_for_tests();
@@ -6757,6 +6787,7 @@ fn test_write_accounts_to_cache_scenarios(
             db.store_accounts_unfrozen(
                 (slot, [(&key, &account)].as_slice()),
                 UpdateIndexThreadSelection::Inline,
+                None,
             );
         }
         InitialState::WithoutLamports => {
@@ -6766,11 +6797,13 @@ fn test_write_accounts_to_cache_scenarios(
             db.store_accounts_unfrozen(
                 (slot, [(&key, &account)].as_slice()),
                 UpdateIndexThreadSelection::Inline,
+                None,
             );
             // Overwrite with a zero-lamport account to simulate ephemeral setup
             db.store_accounts_unfrozen(
                 (slot, [(&key, &account_zero)].as_slice()),
                 UpdateIndexThreadSelection::Inline,
+                None,
             );
         }
     }
@@ -6783,7 +6816,11 @@ fn test_write_accounts_to_cache_scenarios(
         .collect();
     let batch: Vec<_> = accounts.iter().map(|account| (&key, account)).collect();
 
-    db.store_accounts_unfrozen((slot, batch.as_slice()), UpdateIndexThreadSelection::Inline);
+    db.store_accounts_unfrozen(
+        (slot, batch.as_slice()),
+        UpdateIndexThreadSelection::Inline,
+        Some(&ancestors),
+    );
 
     // Verify results
     let loaded = db.load_without_fixed_root(&ancestors, &key);
@@ -6805,6 +6842,15 @@ fn test_write_accounts_to_cache_scenarios(
     assert_eq!(
         ephemeral, expected_ephemeral_skips,
         "Wrong number of ephemeral skips"
+    );
+
+    let ancestors_zero_lamport = db
+        .stats
+        .num_ancestors_zero_lamport_skipped
+        .load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(
+        ancestors_zero_lamport, expected_ancestors_skips,
+        "Wrong number of ancestors zero lamport skips"
     );
 
     let duplicates = db

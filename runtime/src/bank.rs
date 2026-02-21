@@ -91,7 +91,7 @@ use {
         account_locks::validate_account_locks,
         account_storage_entry::AccountStorageEntry,
         accounts::{AccountAddressFilter, Accounts, PubkeyAccountSlot},
-        accounts_db::{AccountsDb, AccountsDbConfig},
+        accounts_db::{AccountsDb, AccountsDbConfig, PopulateReadCache},
         accounts_hash::AccountsLtHash,
         accounts_index::{IndexKey, ScanConfig, ScanResult},
         accounts_update_notifier_interface::AccountsUpdateNotifier,
@@ -192,7 +192,7 @@ use {
                 AtomicBool, AtomicI64, AtomicU64,
                 Ordering::{self, AcqRel, Acquire, Relaxed},
             },
-            Arc, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
+            Arc, LazyLock, LockResult, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
         },
         time::{Duration, Instant},
     },
@@ -235,6 +235,14 @@ pub const MAX_LEADER_SCHEDULE_STAKES: Epoch = 5;
 /// This will be guaranteed through the VAT rules,
 /// only the top 2000 validators by stake will be present in vote account structures.
 pub const MAX_ALPENGLOW_VOTE_ACCOUNTS: usize = 2000;
+
+/// The off-curve account where we store the Alpenglow clock. The clock sysvar has seconds
+/// resolution while the Alpenglow clock has nanosecond resolution.
+static NANOSECOND_CLOCK_ACCOUNT: LazyLock<Pubkey> = LazyLock::new(|| {
+    let (pubkey, _) =
+        Pubkey::find_program_address(&[b"alpenclock"], &agave_feature_set::alpenglow::id());
+    pubkey
+});
 
 pub type BankStatusCache = StatusCache<Result<()>>;
 #[cfg_attr(
@@ -2911,6 +2919,64 @@ impl Bank {
         self.store_account_and_update_capitalization(&GENESIS_CERTIFICATE_ACCOUNT, &cert_acct);
     }
 
+    /// Update the clock sysvar from a block footer's nanosecond timestamp.
+    /// Also stores the nanosecond value for later retrieval via `get_nanosecond_clock`.
+    pub fn update_clock_from_footer(&self, unix_timestamp_nanos: i64) {
+        if !self.feature_set.is_active(&feature_set::alpenglow::id()) {
+            return;
+        }
+
+        // On epoch boundaries, update epoch_start_timestamp
+        //
+        // Note: the genesis block's bank is created via new_from_genesis, which calls update_clock
+        // unconditionally. In update_clock, we have a check for whether slot == 0, and if that's
+        // the case, the clock is set to self.unix_timestamp_from_genesis().
+        //
+        // As a result, we don't actually need the (0, _) case below, since it's never invoked.
+        // However, include this for completeness in the match statement.
+        let unix_timestamp_s = unix_timestamp_nanos / 1_000_000_000;
+        let epoch_start_timestamp = match (self.slot, self.parent()) {
+            (0, _) => self.unix_timestamp_from_genesis(),
+            (_, Some(parent)) if parent.epoch() != self.epoch() => unix_timestamp_s,
+            _ => self.clock().epoch_start_timestamp,
+        };
+
+        // Update clock sysvar
+        // NOTE: block footer UNIX timestamps are in nanoseconds, but clock sysvar stores timestamps
+        // in seconds
+        let clock = sysvar::clock::Clock {
+            slot: self.slot,
+            epoch_start_timestamp,
+            epoch: self.epoch_schedule().get_epoch(self.slot),
+            leader_schedule_epoch: self.epoch_schedule().get_leader_schedule_epoch(self.slot),
+            unix_timestamp: unix_timestamp_s,
+        };
+
+        self.update_sysvar_account(&sysvar::clock::id(), |account| {
+            create_account(
+                &clock,
+                self.inherit_specially_retained_account_fields(account),
+            )
+        });
+
+        // Update Alpenglow clock
+        let data = wincode::serialize(&unix_timestamp_nanos).unwrap();
+        let lamports = Rent::default().minimum_balance(data.len());
+        let mut alpenclock_acct = AccountSharedData::new(lamports, data.len(), &system_program::ID);
+        alpenclock_acct.set_data_from_slice(&data);
+
+        self.store_account_and_update_capitalization(&NANOSECOND_CLOCK_ACCOUNT, &alpenclock_acct);
+    }
+
+    /// Get the nanosecond clock value. Returns `None` if the nanosecond clock has not been
+    /// populated (i.e., before Alpenglow migration completes).
+    pub fn get_nanosecond_clock(&self) -> Option<i64> {
+        self.get_account(&NANOSECOND_CLOCK_ACCOUNT).map(|acct| {
+            wincode::deserialize(acct.data())
+                .expect("Couldn't deserialize nanosecond resolution clock")
+        })
+    }
+
     pub fn confirmed_last_blockhash(&self) -> Hash {
         const NUM_BLOCKHASH_CONFIRMATIONS: usize = 3;
 
@@ -3795,9 +3861,11 @@ impl Bank {
             self.update_bank_hash_stats(&to_store);
             // See https://github.com/solana-labs/solana/pull/31455 for discussion
             // on *not* updating the index within a threadpool.
-            self.rc
-                .accounts
-                .store_accounts_seq(to_store, transactions.as_deref());
+            self.rc.accounts.store_accounts_seq(
+                to_store,
+                transactions.as_deref(),
+                Some(&self.ancestors),
+            );
         });
 
         // Cached vote and stake accounts are synchronized with accounts-db
@@ -4177,7 +4245,9 @@ impl Bank {
             })
         });
         self.update_bank_hash_stats(&accounts);
-        self.rc.accounts.store_accounts_par(accounts, None);
+        self.rc
+            .accounts
+            .store_accounts_par(accounts, None, Some(&self.ancestors));
         m.stop();
         self.rc
             .accounts
@@ -4410,14 +4480,14 @@ impl Bank {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        self.load_account_with(pubkey, false)
+        self.load_account_with(pubkey, PopulateReadCache::False)
             .map(|(acc, _slot)| acc)
     }
 
     fn load_account_with(
         &self,
         pubkey: &Pubkey,
-        should_put_in_read_cache: bool,
+        should_put_in_read_cache: PopulateReadCache,
     ) -> Option<(AccountSharedData, Slot)> {
         self.rc.accounts.accounts_db.load_account_with(
             &self.ancestors,

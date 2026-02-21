@@ -20,9 +20,11 @@ use {
     solana_accounts_db::accounts_db::ACCOUNTS_DB_CONFIG_FOR_TESTING,
     solana_banks_client::start_client,
     solana_banks_server::banks_server::start_local_server,
-    solana_clock::{Epoch, Slot},
+    solana_clock::{Clock, Epoch, Slot},
     solana_cluster_type::ClusterType,
-    solana_compute_budget::compute_budget::ComputeBudget,
+    solana_compute_budget::compute_budget::{ComputeBudget, SVMTransactionExecutionCost},
+    solana_epoch_rewards::EpochRewards,
+    solana_epoch_schedule::EpochSchedule,
     solana_fee_calculator::{FeeRateGovernor, DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE},
     solana_genesis_config::GenesisConfig,
     solana_hash::Hash,
@@ -38,7 +40,7 @@ use {
     solana_program_error::{ProgramError, ProgramResult},
     solana_program_runtime::{
         invoke_context::BuiltinFunctionWithContext, loaded_programs::ProgramCacheEntry,
-        serialization::serialize_parameters, stable_log,
+        serialization::serialize_parameters, stable_log, sysvar_cache::SysvarCache,
     },
     solana_pubkey::Pubkey,
     solana_rent::Rent,
@@ -52,7 +54,7 @@ use {
     solana_signer::Signer,
     solana_svm_log_collector::ic_msg,
     solana_svm_timings::ExecuteTimings,
-    solana_sysvar::SysvarSerialize,
+    solana_sysvar::{last_restart_slot::LastRestartSlot, SysvarSerialize},
     solana_sysvar_id::SysvarId,
     solana_vote_program::vote_state::{VoteStateV4, VoteStateVersions},
     std::{
@@ -240,6 +242,68 @@ fn get_sysvar<T: Default + SysvarSerialize + Sized + serde::de::DeserializeOwned
 }
 
 struct SyscallStubs {}
+
+impl SyscallStubs {
+    fn fetch_and_write_sysvar<T: SysvarSerialize>(
+        &self,
+        var_addr: *mut u8,
+        offset: u64,
+        length: u64,
+        fetch: impl FnOnce(&SysvarCache) -> Result<Arc<T>, InstructionError>,
+    ) -> u64 {
+        // Consume compute units for the syscall.
+        let invoke_context = get_invoke_context();
+        let SVMTransactionExecutionCost {
+            sysvar_base_cost,
+            cpi_bytes_per_unit,
+            mem_op_base_cost,
+            ..
+        } = *invoke_context.get_execution_cost();
+
+        let sysvar_id_cost = 32_u64.checked_div(cpi_bytes_per_unit).unwrap_or(0);
+        let sysvar_buf_cost = length.checked_div(cpi_bytes_per_unit).unwrap_or(0);
+
+        if invoke_context
+            .consume_checked(
+                sysvar_base_cost
+                    .saturating_add(sysvar_id_cost)
+                    .saturating_add(std::cmp::max(sysvar_buf_cost, mem_op_base_cost)),
+            )
+            .is_err()
+        {
+            panic!("Exceeded compute budget");
+        }
+
+        // Fetch the sysvar from the cache.
+        let Ok(sysvar) = fetch(get_invoke_context().get_sysvar_cache()) else {
+            return UNSUPPORTED_SYSVAR;
+        };
+
+        // Check that the requested length is not greater than
+        // the actual serialized length of the sysvar data.
+        let Ok(expected_length) = bincode::serialized_size(&sysvar) else {
+            return UNSUPPORTED_SYSVAR;
+        };
+
+        if offset.saturating_add(length) > expected_length {
+            return UNSUPPORTED_SYSVAR;
+        }
+
+        // Write only the requested slice [offset, offset + length).
+        if let Ok(serialized) = bincode::serialize(&sysvar) {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    serialized[offset as usize..].as_ptr(),
+                    var_addr,
+                    length as usize,
+                )
+            };
+            SUCCESS
+        } else {
+            UNSUPPORTED_SYSVAR
+        }
+    }
+}
 impl solana_sysvar::program_stubs::SyscallStubs for SyscallStubs {
     fn sol_log(&self, message: &str) {
         let invoke_context = get_invoke_context();
@@ -431,6 +495,47 @@ impl solana_sysvar::program_stubs::SyscallStubs for SyscallStubs {
     fn sol_get_stack_height(&self) -> u64 {
         let invoke_context = get_invoke_context();
         invoke_context.get_stack_height().try_into().unwrap()
+    }
+
+    fn sol_get_sysvar(
+        &self,
+        sysvar_id_addr: *const u8,
+        var_addr: *mut u8,
+        offset: u64,
+        length: u64,
+    ) -> u64 {
+        let sysvar_id = unsafe { &*(sysvar_id_addr as *const Pubkey) };
+
+        match *sysvar_id {
+            id if id == Clock::id() => self.fetch_and_write_sysvar::<Clock>(
+                var_addr,
+                offset,
+                length,
+                SysvarCache::get_clock,
+            ),
+            id if id == EpochRewards::id() => self.fetch_and_write_sysvar::<EpochRewards>(
+                var_addr,
+                offset,
+                length,
+                SysvarCache::get_epoch_rewards,
+            ),
+            id if id == EpochSchedule::id() => self.fetch_and_write_sysvar::<EpochSchedule>(
+                var_addr,
+                offset,
+                length,
+                SysvarCache::get_epoch_schedule,
+            ),
+            id if id == LastRestartSlot::id() => self.fetch_and_write_sysvar::<LastRestartSlot>(
+                var_addr,
+                offset,
+                length,
+                SysvarCache::get_last_restart_slot,
+            ),
+            id if id == Rent::id() => {
+                self.fetch_and_write_sysvar::<Rent>(var_addr, offset, length, SysvarCache::get_rent)
+            }
+            _ => UNSUPPORTED_SYSVAR,
+        }
     }
 }
 

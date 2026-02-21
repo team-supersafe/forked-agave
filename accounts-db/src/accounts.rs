@@ -3,8 +3,8 @@ use {
         account_locks::{validate_account_locks, AccountLocks},
         account_storage::stored_account_info::StoredAccountInfo,
         accounts_db::{
-            AccountsAddRootTiming, AccountsDb, LoadHint, LoadedAccount, ScanAccountStorageData,
-            ScanStorageResult, UpdateIndexThreadSelection,
+            AccountsAddRootTiming, AccountsDb, LoadHint, LoadedAccount, PopulateReadCache,
+            ScanAccountStorageData, ScanStorageResult, UpdateIndexThreadSelection,
         },
         accounts_index::{IndexKey, ScanConfig, ScanError, ScanOrder, ScanResult},
         ancestors::Ancestors,
@@ -167,8 +167,10 @@ impl Accounts {
         ancestors: &Ancestors,
         pubkey: &Pubkey,
         load_hint: LoadHint,
+        populate_read_cache: PopulateReadCache,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.accounts_db.load(ancestors, pubkey, load_hint)
+        self.accounts_db
+            .load(ancestors, pubkey, load_hint, populate_read_cache)
     }
 
     pub fn load_with_fixed_root(
@@ -176,7 +178,12 @@ impl Accounts {
         ancestors: &Ancestors,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.load_slow(ancestors, pubkey, LoadHint::FixedMaxRoot)
+        self.load_slow(
+            ancestors,
+            pubkey,
+            LoadHint::FixedMaxRoot,
+            PopulateReadCache::True,
+        )
     }
 
     /// same as `load_with_fixed_root` except:
@@ -189,7 +196,8 @@ impl Accounts {
         self.load_slow(
             ancestors,
             pubkey,
-            LoadHint::FixedMaxRootDoNotPopulateReadCache,
+            LoadHint::FixedMaxRoot,
+            PopulateReadCache::True,
         )
     }
 
@@ -198,7 +206,12 @@ impl Accounts {
         ancestors: &Ancestors,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.load_slow(ancestors, pubkey, LoadHint::Unspecified)
+        self.load_slow(
+            ancestors,
+            pubkey,
+            LoadHint::Unspecified,
+            PopulateReadCache::True,
+        )
     }
 
     /// scans underlying accounts_db for this delta (slot) with a map function
@@ -554,8 +567,14 @@ impl Accounts {
         &self,
         accounts: impl StorableAccounts<'a>,
         transactions: Option<&'a [&'a SanitizedTransaction]>,
+        ancestors: Option<&Ancestors>,
     ) {
-        self._store_accounts(accounts, transactions, UpdateIndexThreadSelection::Inline);
+        self._store_accounts(
+            accounts,
+            transactions,
+            UpdateIndexThreadSelection::Inline,
+            ancestors,
+        );
     }
 
     /// Store `accounts` into the DB
@@ -566,11 +585,13 @@ impl Accounts {
         &self,
         accounts: impl StorableAccounts<'a>,
         transactions: Option<&'a [&'a SanitizedTransaction]>,
+        ancestors: Option<&Ancestors>,
     ) {
         self._store_accounts(
             accounts,
             transactions,
             UpdateIndexThreadSelection::PoolWithThreshold,
+            ancestors,
         );
     }
 
@@ -584,6 +605,7 @@ impl Accounts {
         accounts: impl StorableAccounts<'a>,
         transactions: Option<&'a [&'a SanitizedTransaction]>,
         update_index_thread_selection: UpdateIndexThreadSelection,
+        ancestors: Option<&Ancestors>,
     ) {
         let accounts_db = &self.accounts_db;
         if accounts_db.has_accounts_update_notifier() {
@@ -607,7 +629,7 @@ impl Accounts {
             }
         }
 
-        accounts_db.store_accounts_unfrozen(accounts, update_index_thread_selection);
+        accounts_db.store_accounts_unfrozen(accounts, update_index_thread_selection, ancestors);
     }
 
     /// Add a slot to root.  Root slots cannot be purged
