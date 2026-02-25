@@ -3594,20 +3594,6 @@ impl AccountsDb {
         )
     }
 
-    /// note this returns None for accounts with zero lamports
-    pub fn load_with_fixed_root(
-        &self,
-        ancestors: &Ancestors,
-        pubkey: &Pubkey,
-    ) -> Option<(AccountSharedData, Slot)> {
-        self.load(
-            ancestors,
-            pubkey,
-            LoadHint::FixedMaxRoot,
-            PopulateReadCache::True,
-        )
-    }
-
     fn read_index_for_accessor_or_load_slow<'a>(
         &'a self,
         ancestors: &Ancestors,
@@ -3914,25 +3900,6 @@ impl AccountsDb {
             load_hint,
             load_zero_lamports,
             populate_read_cache,
-        )
-    }
-
-    /// Load account with `pubkey` and maybe put into read cache.
-    ///
-    /// Return the account and the slot when the account was last stored.
-    /// Return None for ZeroLamport accounts.
-    pub fn load_account_with(
-        &self,
-        ancestors: &Ancestors,
-        pubkey: &Pubkey,
-        should_put_in_read_cache: PopulateReadCache,
-    ) -> Option<(AccountSharedData, Slot)> {
-        self.do_load_with_populate_read_cache(
-            ancestors,
-            pubkey,
-            LoadHint::Unspecified,
-            LoadZeroLamports::None,
-            should_put_in_read_cache,
         )
     }
 
@@ -6959,6 +6926,23 @@ impl AccountsDb {
         self.flush_root_write_cache(slot);
     }
 
+    /// note this returns None for accounts with zero lamports
+    #[cfg(test)]
+    fn load_with_fixed_root(
+        &self,
+        ancestors: &Ancestors,
+        pubkey: &Pubkey,
+    ) -> Option<(AccountSharedData, Slot)> {
+        self.do_load(
+            ancestors,
+            pubkey,
+            LoadHint::FixedMaxRoot,
+            LoadZeroLamports::None,
+            PopulateReadCache::True,
+        )
+    }
+
+    /// note this returns Some for accounts with zero lamports
     pub fn load_without_fixed_root(
         &self,
         ancestors: &Ancestors,
