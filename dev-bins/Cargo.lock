@@ -9033,6 +9033,7 @@ dependencies = [
 name = "solana-streamer"
 version = "4.1.0-alpha.0"
 dependencies = [
+ "agave-xdp",
  "arc-swap",
  "bytes",
  "crossbeam-channel",
