@@ -716,8 +716,13 @@ where
     );
 
     let ((vote_id, mut vote_account), (stake_id, stake_account)) =
-        crate::stakes::tests::create_staked_node_accounts(10_000);
-    let starting_vote_and_stake_balance = 10_000 + 1;
+        crate::stakes::tests::create_staked_node_accounts(10_000, &bank0.rent_collector.rent);
+    let starting_vote_and_stake_balance = 10_000
+        + 1
+        + bank0
+            .rent_collector
+            .rent
+            .minimum_balance(StakeStateV2::size_of());
 
     // set up accounts
     bank0.store_account_and_update_capitalization(&stake_id, &stake_account);
@@ -876,9 +881,19 @@ fn do_test_bank_update_rewards_determinism() -> u64 {
         100,
     );
     let stake_id1 = solana_pubkey::new_rand();
-    let stake_account1 = crate::stakes::tests::create_stake_account(123, &vote_id, &stake_id1);
+    let stake_account1 = crate::stakes::tests::create_stake_account(
+        123,
+        &vote_id,
+        &stake_id1,
+        &bank.rent_collector.rent,
+    );
     let stake_id2 = solana_pubkey::new_rand();
-    let stake_account2 = crate::stakes::tests::create_stake_account(456, &vote_id, &stake_id2);
+    let stake_account2 = crate::stakes::tests::create_stake_account(
+        456,
+        &vote_id,
+        &stake_id2,
+        &bank.rent_collector.rent,
+    );
 
     // set up accounts
     bank.store_account_and_update_capitalization(&stake_id1, &stake_account1);
@@ -3599,7 +3614,7 @@ fn test_add_instruction_processor_for_existing_unrelated_accounts() {
         }
 
         let ((vote_id, vote_account), (stake_id, stake_account)) =
-            crate::stakes::tests::create_staked_node_accounts(1_0000);
+            crate::stakes::tests::create_staked_node_accounts(1_0000, &bank.rent_collector.rent);
         bank.capitalization
             .fetch_add(vote_account.lamports() + stake_account.lamports(), Relaxed);
         bank.store_account(&vote_id, &vote_account);
@@ -5340,7 +5355,7 @@ fn test_shrink_candidate_slots_cached() {
     // No more slots should be shrunk
     assert_eq!(bank2.shrink_candidate_slots(), 0);
     // alive_counts represents the count of alive accounts in the three slots 0,1,2
-    assert_eq!(alive_counts, vec![13, 1, 6]);
+    assert_eq!(alive_counts, vec![14, 1, 6]);
 }
 
 #[test]
@@ -6581,7 +6596,7 @@ fn test_compute_active_feature_set() {
         .parse::<Pubkey>()
         .unwrap();
     let mut feature_set = FeatureSet::default();
-    feature_set.inactive_mut().insert(test_feature);
+    feature_set.deactivate(&test_feature);
     bank.feature_set = Arc::new(feature_set.clone());
 
     let (feature_set, new_activations) = bank.compute_active_feature_set(true);
@@ -7558,7 +7573,7 @@ fn setup_banks_on_fork_to_remove(
         }
     }
 
-    let ancestors: Vec<(Slot, usize)> = slots_on_fork.iter().map(|(s, _)| (*s, 0)).collect();
+    let ancestors: Vec<_> = slots_on_fork.iter().map(|(s, _)| *s).collect();
     let ancestors = Ancestors::from(ancestors);
 
     (bank_at_fork_tip, slots_on_fork, ancestors)
@@ -8615,22 +8630,40 @@ fn do_test_clean_dropped_unrooted_banks(freeze_bank1: FreezeBank1) {
     let expected_ref_count_for_cleaned_up_keys = 0;
     let expected_ref_count_for_keys_in_both_slot1_and_slot2 = 1;
 
-    bank2
-        .rc
-        .accounts
-        .accounts_db
-        .assert_ref_count(&key1.pubkey(), expected_ref_count_for_cleaned_up_keys);
-    bank2.rc.accounts.accounts_db.assert_ref_count(
-        &key3.pubkey(),
+    assert_eq!(
+        bank2
+            .rc
+            .accounts
+            .accounts_db
+            .accounts_index
+            .ref_count_from_storage(&key1.pubkey()),
+        expected_ref_count_for_cleaned_up_keys,
+    );
+    assert_eq!(
+        bank2
+            .rc
+            .accounts
+            .accounts_db
+            .accounts_index
+            .ref_count_from_storage(&key3.pubkey()),
         expected_ref_count_for_keys_in_both_slot1_and_slot2,
     );
-    bank2
-        .rc
-        .accounts
-        .accounts_db
-        .assert_ref_count(&key4.pubkey(), expected_ref_count_for_cleaned_up_keys);
-    bank2.rc.accounts.accounts_db.assert_ref_count(
-        &key5.pubkey(),
+    assert_eq!(
+        bank2
+            .rc
+            .accounts
+            .accounts_db
+            .accounts_index
+            .ref_count_from_storage(&key4.pubkey()),
+        expected_ref_count_for_cleaned_up_keys,
+    );
+    assert_eq!(
+        bank2
+            .rc
+            .accounts
+            .accounts_db
+            .accounts_index
+            .ref_count_from_storage(&key5.pubkey()),
         expected_ref_count_for_keys_in_both_slot1_and_slot2,
     );
     assert_eq!(
