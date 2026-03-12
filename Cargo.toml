@@ -398,7 +398,7 @@ solana-big-mod-exp = "3.0.0"
 solana-bincode = "3.1.0"
 solana-blake3-hasher = "3.1.0"
 solana-bloom = { path = "bloom", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
-solana-bls-signatures = { version = "3.1.0", features = ["serde"] }
+solana-bls-signatures = { version = "3.2.0", features = ["serde"] }
 solana-bn254 = "3.2.1"
 solana-borsh = "3.0.1"
 solana-bpf-loader-program = { path = "programs/bpf_loader", version = "=4.1.0-alpha.0", default-features = false, features = ["agave-unstable-api"] }
@@ -441,7 +441,7 @@ solana-fee = { path = "fee", version = "=4.1.0-alpha.0", features = ["agave-unst
 solana-fee-calculator = "3.1.0"
 solana-fee-structure = "3.0.0"
 solana-file-download = "3.1.4"
-solana-frozen-abi = "3.2.1"
+solana-frozen-abi = "3.2.2"
 solana-frozen-abi-macro = "3.2.1"
 solana-genesis = { path = "genesis", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 solana-genesis-config = "4.0.0"
