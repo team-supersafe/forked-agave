@@ -127,7 +127,7 @@ use {
     solana_packet::PACKET_DATA_SIZE,
     solana_precompile_error::PrecompileError,
     solana_program_runtime::{
-        invoke_context::BuiltinFunctionWithContext,
+        invoke_context::BuiltinFunctionRegisterer,
         loaded_programs::{ProgramCacheEntry, ProgramRuntimeEnvironment},
     },
     solana_pubkey::{Pubkey, PubkeyHasherBuilder},
@@ -537,6 +537,7 @@ impl PartialEq for Bank {
             rc: _,
             status_cache: _,
             blockhash_queue,
+            max_processing_age,
             ancestors: _,
             hash,
             parent_hash,
@@ -605,6 +606,7 @@ impl PartialEq for Bank {
             // is added to the struct, this PartialEq is accordingly updated.
         } = self;
         *blockhash_queue.read().unwrap() == *other.blockhash_queue.read().unwrap()
+            && *max_processing_age == other.max_processing_age
             && *hash.read().unwrap() == *other.hash.read().unwrap()
             && parent_hash == &other.parent_hash
             && parent_slot == &other.parent_slot
@@ -753,6 +755,9 @@ pub struct Bank {
 
     /// FIFO queue of `recent_blockhash` items
     blockhash_queue: RwLock<BlockhashQueue>,
+
+    /// Maximum age in slots a blockhash can be for a tx to be processed.
+    max_processing_age: usize,
 
     /// The set of parents including this bank
     pub ancestors: Ancestors,
@@ -1093,6 +1098,7 @@ impl Bank {
             rc: BankRc::new(accounts),
             status_cache: Arc::<RwLock<BankStatusCache>>::default(),
             blockhash_queue: RwLock::<BlockhashQueue>::default(),
+            max_processing_age: MAX_PROCESSING_AGE,
             ancestors: Ancestors::default(),
             hash: RwLock::<Hash>::default(),
             parent_hash: Hash::default(),
@@ -1330,7 +1336,7 @@ impl Bank {
             bank_id,
             epoch,
             blockhash_queue,
-
+            max_processing_age: parent.max_processing_age,
             // TODO: clean this up, so much special-case copying...
             hashes_per_tick: parent.hashes_per_tick,
             ticks_per_slot: parent.ticks_per_slot,
@@ -1900,6 +1906,7 @@ impl Bank {
             rc: bank_rc,
             status_cache: Arc::<RwLock<BankStatusCache>>::default(),
             blockhash_queue: RwLock::new(fields.blockhash_queue),
+            max_processing_age: MAX_PROCESSING_AGE,
             ancestors,
             hash: RwLock::new(fields.hash),
             parent_hash: fields.parent_hash,
@@ -2454,6 +2461,10 @@ impl Bank {
         self.epoch_schedule().get_slots_in_epoch(epoch) as f64 / self.slots_per_year
     }
 
+    pub fn max_processing_age(&self) -> usize {
+        self.max_processing_age
+    }
+
     // Calculates the starting-slot for inflation from the activation slot.
     // This method assumes that `pico_inflation` will be enabled before `full_inflation`, giving
     // precedence to the latter. However, since `pico_inflation` is fixed-rate Inflation, should
@@ -2900,7 +2911,7 @@ impl Bank {
 
     pub fn is_blockhash_valid(&self, hash: &Hash) -> bool {
         let blockhash_queue = self.blockhash_queue.read().unwrap();
-        blockhash_queue.is_hash_valid_for_age(hash, MAX_PROCESSING_AGE)
+        blockhash_queue.is_hash_valid_for_age(hash, self.max_processing_age)
     }
 
     pub fn get_minimum_balance_for_rent_exemption(&self, data_len: usize) -> u64 {
@@ -2955,7 +2966,7 @@ impl Bank {
         // length is made variable by epoch
         blockhash_queue
             .get_hash_age(blockhash)
-            .map(|age| self.block_height + MAX_PROCESSING_AGE as u64 - age)
+            .map(|age| self.block_height + self.max_processing_age as u64 - age)
     }
 
     /// Query the alpenglow genesis certificate account.
@@ -3398,7 +3409,8 @@ impl Bank {
             // After simulation, transactions will need to be forwarded to the leader
             // for processing. During forwarding, the transaction could expire if the
             // delay is not accounted for.
-            MAX_PROCESSING_AGE - MAX_TRANSACTION_FORWARDING_DELAY,
+            self.max_processing_age
+                .saturating_sub(MAX_TRANSACTION_FORWARDING_DELAY),
             &mut timings,
             &mut TransactionErrorMetrics::default(),
             TransactionProcessingConfig {
@@ -4087,14 +4099,12 @@ impl Bank {
     pub fn load_execute_and_commit_transactions(
         &self,
         batch: &TransactionBatch<impl TransactionWithMeta>,
-        max_age: usize,
         recording_config: ExecutionRecordingConfig,
         timings: &mut ExecuteTimings,
         log_messages_bytes_limit: Option<usize>,
     ) -> (Vec<TransactionCommitResult>, Option<BalanceCollector>) {
         self.do_load_execute_and_commit_transactions_with_pre_commit_callback(
             batch,
-            max_age,
             recording_config,
             timings,
             log_messages_bytes_limit,
@@ -4106,7 +4116,6 @@ impl Bank {
     pub fn load_execute_and_commit_transactions_with_pre_commit_callback<'a>(
         &'a self,
         batch: &TransactionBatch<impl TransactionWithMeta>,
-        max_age: usize,
         recording_config: ExecutionRecordingConfig,
         timings: &mut ExecuteTimings,
         log_messages_bytes_limit: Option<usize>,
@@ -4117,7 +4126,6 @@ impl Bank {
     ) -> Result<(Vec<TransactionCommitResult>, Option<BalanceCollector>)> {
         self.do_load_execute_and_commit_transactions_with_pre_commit_callback(
             batch,
-            max_age,
             recording_config,
             timings,
             log_messages_bytes_limit,
@@ -4128,7 +4136,6 @@ impl Bank {
     fn do_load_execute_and_commit_transactions_with_pre_commit_callback<'a>(
         &'a self,
         batch: &TransactionBatch<impl TransactionWithMeta>,
-        max_age: usize,
         recording_config: ExecutionRecordingConfig,
         timings: &mut ExecuteTimings,
         log_messages_bytes_limit: Option<usize>,
@@ -4142,7 +4149,7 @@ impl Bank {
             balance_collector,
         } = self.load_and_execute_transactions(
             batch,
-            max_age,
+            self.max_processing_age,
             timings,
             &mut TransactionErrorMetrics::default(),
             TransactionProcessingConfig {
@@ -4192,7 +4199,6 @@ impl Bank {
 
         let (mut commit_results, ..) = self.load_execute_and_commit_transactions(
             &batch,
-            MAX_PROCESSING_AGE,
             ExecutionRecordingConfig {
                 enable_cpi_recording: false,
                 enable_log_recording: true,
@@ -4235,7 +4241,6 @@ impl Bank {
     ) -> Vec<Result<()>> {
         self.load_execute_and_commit_transactions(
             batch,
-            MAX_PROCESSING_AGE,
             ExecutionRecordingConfig::new_single_setting(false),
             &mut ExecuteTimings::default(),
             None,
@@ -5401,15 +5406,11 @@ impl Bank {
         !self.is_delta.load(Relaxed)
     }
 
-    pub fn add_mockup_builtin(
-        &mut self,
-        program_id: Pubkey,
-        builtin_function: BuiltinFunctionWithContext,
-    ) {
+    pub fn add_mockup_builtin(&mut self, program_id: Pubkey, builtin: BuiltinFunctionRegisterer) {
         self.add_builtin(
             program_id,
             "mockup",
-            ProgramCacheEntry::new_builtin(self.slot, 0, builtin_function),
+            ProgramCacheEntry::new_builtin(self.slot, 0, builtin),
         );
     }
 
@@ -5686,7 +5687,7 @@ impl Bank {
                         ProgramCacheEntry::new_builtin(
                             self.feature_set.activated_slot(&feature_id).unwrap_or(0),
                             builtin.name.len(),
-                            builtin.entrypoint,
+                            builtin.register_fn,
                         ),
                     );
                 }
@@ -5844,7 +5845,7 @@ impl Bank {
                     ProgramCacheEntry::new_builtin(
                         activation_slot,
                         builtin.name.len(),
-                        builtin.entrypoint,
+                        builtin.register_fn,
                     ),
                 );
             }
@@ -6146,10 +6147,10 @@ impl Bank {
     pub fn new_with_mockup_builtin_for_tests(
         genesis_config: &GenesisConfig,
         program_id: Pubkey,
-        builtin_function: BuiltinFunctionWithContext,
+        builtin: BuiltinFunctionRegisterer,
     ) -> (Arc<Self>, Arc<RwLock<BankForks>>) {
         let mut bank = Self::new_for_tests(genesis_config);
-        bank.add_mockup_builtin(program_id, builtin_function);
+        bank.add_mockup_builtin(program_id, builtin);
         bank.wrap_with_bank_forks_for_tests()
     }
 

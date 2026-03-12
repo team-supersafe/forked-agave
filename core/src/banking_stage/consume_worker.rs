@@ -207,7 +207,7 @@ pub(crate) mod external {
             transaction_data::TransactionData, transaction_view::SanitizedTransactionView,
         },
         solana_account::ReadableAccount,
-        solana_clock::{MAX_PROCESSING_AGE, Slot},
+        solana_clock::Slot,
         solana_cost_model::cost_model::CostModel,
         solana_message::v0::LoadedAddresses,
         solana_pubkey::Pubkey,
@@ -919,7 +919,7 @@ pub(crate) mod external {
                 .check_transactions_with_processed_slots(
                     txs,
                     &[const { Ok(()) }; MAX_TRANSACTIONS_PER_MESSAGE],
-                    MAX_PROCESSING_AGE,
+                    working_bank.max_processing_age(),
                     true,
                     &mut error_counters,
                 );
@@ -2146,7 +2146,7 @@ mod tests {
             tests::{create_slow_genesis_config, sanitize_transactions},
         },
         crossbeam_channel::unbounded,
-        solana_clock::{MAX_PROCESSING_AGE, Slot},
+        solana_clock::Slot,
         solana_genesis_config::GenesisConfig,
         solana_keypair::Keypair,
         solana_ledger::genesis_utils::GenesisConfigInfo,
@@ -2635,7 +2635,7 @@ mod tests {
             .check_transactions(
                 &sanitized_txs,
                 &vec![Ok(()); sanitized_txs.len()],
-                MAX_PROCESSING_AGE,
+                bank.max_processing_age(),
                 &mut TransactionErrorMetrics::default(),
             )
             .into_iter()
