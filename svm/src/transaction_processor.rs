@@ -982,7 +982,6 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
         let mut process_message_time = Measure::start("process_message_time");
         let process_result = process_message(
             tx,
-            &loaded_transaction.program_indices,
             &mut invoke_context,
             execute_timings,
             &mut executed_units,
@@ -1545,7 +1544,6 @@ mod tests {
 
         let loaded_transaction = LoadedTransaction {
             accounts: vec![(Pubkey::new_unique(), AccountSharedData::default())],
-            program_indices: vec![0],
             fee_details: FeeDetails::default(),
             rollback_accounts: RollbackAccounts::default(),
             compute_budget: SVMTransactionExecutionBudget::default(),
@@ -1640,7 +1638,6 @@ mod tests {
                 (key1, AccountSharedData::default()),
                 (key2, AccountSharedData::default()),
             ],
-            program_indices: vec![0],
             fee_details: FeeDetails::default(),
             rollback_accounts: RollbackAccounts::default(),
             compute_budget: SVMTransactionExecutionBudget::default(),
