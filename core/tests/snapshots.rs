@@ -30,7 +30,6 @@ use {
         snapshot_controller::SnapshotController,
         snapshot_package::SnapshotPackage,
         snapshot_utils,
-        status_cache::MAX_CACHE_ENTRIES,
     },
     solana_sha256_hasher::hashv,
     solana_signer::Signer,
@@ -265,10 +264,23 @@ fn goto_end_of_slot(bank: &Bank) {
     }
 }
 
+fn get_default_max_status_cache_entries() -> u64 {
+    SnapshotTestConfig::new(SnapshotInterval::Disabled, SnapshotInterval::Disabled)
+        .bank_forks
+        .read()
+        .unwrap()
+        .root_bank()
+        .status_cache
+        .read()
+        .unwrap()
+        .max_root_entries() as u64
+}
+
 #[test]
 fn test_slots_to_snapshot() {
     agave_logger::setup();
-    let num_set_roots = MAX_CACHE_ENTRIES * 2;
+    let status_cache_max_entries = get_default_max_status_cache_entries();
+    let num_set_roots = status_cache_max_entries * 2;
 
     for add_root_interval in &[1, 3, 9] {
         let (snapshot_sender, _snapshot_receiver) = unbounded();
@@ -305,9 +317,8 @@ fn test_slots_to_snapshot() {
             );
         }
 
-        let num_old_slots = num_set_roots * *add_root_interval - MAX_CACHE_ENTRIES + 1;
-        let expected_slots_to_snapshot =
-            num_old_slots as u64..=num_set_roots as u64 * *add_root_interval as u64;
+        let num_old_slots = num_set_roots * *add_root_interval - status_cache_max_entries + 1;
+        let expected_slots_to_snapshot = num_old_slots..=num_set_roots * *add_root_interval;
 
         let slots_to_snapshot = bank_forks
             .read()
@@ -326,15 +337,16 @@ fn test_slots_to_snapshot() {
 
 #[test]
 fn test_bank_forks_status_cache_snapshot() {
-    // create banks up to slot (MAX_CACHE_ENTRIES * 2) + 1 while transferring 1 lamport into 2 different accounts each time
+    // create banks up to slot (`max_root_entries` * 2) + 1 while transferring 1 lamport into 2 different accounts each time
     // this is done to ensure the AccountStorageEntries keep getting cleaned up as the root moves
     // ahead. Also tests the status_cache purge and status cache snapshotting.
     // Makes sure that the last bank is restored correctly
+    let status_cache_max_entries = get_default_max_status_cache_entries();
     let key1 = Keypair::new().pubkey();
     let key2 = Keypair::new().pubkey();
     for set_root_interval in &[1, 4] {
         run_bank_forks_snapshot_n(
-            (MAX_CACHE_ENTRIES * 2) as u64,
+            status_cache_max_entries + 1,
             |bank, mint_keypair| {
                 let tx = system_transaction::transfer(
                     mint_keypair,
