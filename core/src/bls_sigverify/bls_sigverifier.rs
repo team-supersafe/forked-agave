@@ -116,12 +116,13 @@ impl SigVerifier {
             .thread_name(|i| format!("solSigVerBLS{i:02}"))
             .build()
             .unwrap();
+        let root_slot = sharable_banks.root().slot();
         Self {
             migration_status,
             banlist,
             channels,
             sharable_banks,
-            stats: SigVerifierStats::default(),
+            stats: SigVerifierStats::new(root_slot),
             verified_certs: HashSet::new(),
             last_checked_root_slot: 0,
             cluster_info,
@@ -150,9 +151,9 @@ impl SigVerifier {
                 error!("verify_and_send_batch() failed with {e}. Exiting.");
                 break;
             }
-            self.stats.maybe_report();
+            self.stats.maybe_report(self.sharable_banks.root().slot());
         }
-        self.stats.do_report();
+        self.stats.do_report(self.sharable_banks.root().slot());
     }
 
     fn verify_and_send_batches(&mut self, batches: Vec<PacketBatch>) -> Result<(), SigVerifyError> {
@@ -543,7 +544,7 @@ mod tests {
             vote_rank2,
         );
         let messages2 = vec![ConsensusMessage::Vote(vote_message2)];
-        ctx.verifier.stats = SigVerifierStats::default();
+        ctx.verifier.stats = SigVerifierStats::new(ctx.verifier.sharable_banks.root().slot());
         ctx.verifier
             .verify_and_send_batches(messages_to_batches(&messages2))
             .unwrap();
@@ -567,7 +568,7 @@ mod tests {
             vote_rank3,
         );
         let messages3 = vec![ConsensusMessage::Vote(vote_message3)];
-        ctx.verifier.stats = SigVerifierStats::default();
+        ctx.verifier.stats = SigVerifierStats::new(ctx.verifier.sharable_banks.root().slot());
         ctx.verifier
             .verify_and_send_batches(messages_to_batches(&messages3))
             .unwrap();
@@ -1377,7 +1378,7 @@ mod tests {
         let consensus_message2 = ConsensusMessage::Certificate(cert2);
         let packet_batches2 = messages_to_batches(&[consensus_message2]);
 
-        ctx.verifier.stats = SigVerifierStats::default();
+        ctx.verifier.stats = SigVerifierStats::new(ctx.verifier.sharable_banks.root().slot());
         ctx.verifier
             .verify_and_send_batches(packet_batches2)
             .unwrap();
