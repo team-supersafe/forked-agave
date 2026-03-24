@@ -1619,8 +1619,6 @@ impl ConsumeWorkerMetrics {
             retryable_transaction_indexes,
             execute_and_commit_timings,
             error_counters,
-            min_prioritization_fees,
-            max_prioritization_fees,
             ..
         }: &ExecuteAndCommitTransactionsOutput,
     ) {
@@ -1642,20 +1640,6 @@ impl ConsumeWorkerMetrics {
         self.count_metrics
             .retryable_transaction_count
             .fetch_add(retryable_transaction_indexes.len(), Ordering::Relaxed);
-        let min_prioritization_fees = self
-            .count_metrics
-            .min_prioritization_fees
-            .fetch_min(*min_prioritization_fees, Ordering::Relaxed);
-        let max_prioritization_fees = self
-            .count_metrics
-            .max_prioritization_fees
-            .fetch_max(*max_prioritization_fees, Ordering::Relaxed);
-        self.count_metrics
-            .min_prioritization_fees
-            .swap(min_prioritization_fees, Ordering::Relaxed);
-        self.count_metrics
-            .max_prioritization_fees
-            .swap(max_prioritization_fees, Ordering::Relaxed);
         self.update_on_execute_and_commit_timings(execute_and_commit_timings);
         self.update_on_error_counters(error_counters);
     }
@@ -1804,6 +1788,7 @@ impl ConsumeWorkerMetrics {
     }
 }
 
+#[derive(Default)]
 struct ConsumeWorkerCountMetrics {
     max_queue_len: AtomicU64,
     num_messages_processed: AtomicU64,
@@ -1813,25 +1798,6 @@ struct ConsumeWorkerCountMetrics {
     retryable_transaction_count: AtomicUsize,
     retryable_expired_bank_count: AtomicUsize,
     cost_model_throttled_transactions_count: AtomicU64,
-    min_prioritization_fees: AtomicU64,
-    max_prioritization_fees: AtomicU64,
-}
-
-impl Default for ConsumeWorkerCountMetrics {
-    fn default() -> Self {
-        Self {
-            max_queue_len: AtomicU64::default(),
-            num_messages_processed: AtomicU64::default(),
-            transactions_attempted_processing_count: AtomicU64::default(),
-            processed_transactions_count: AtomicU64::default(),
-            processed_with_successful_result_count: AtomicU64::default(),
-            retryable_transaction_count: AtomicUsize::default(),
-            retryable_expired_bank_count: AtomicUsize::default(),
-            cost_model_throttled_transactions_count: AtomicU64::default(),
-            min_prioritization_fees: AtomicU64::new(u64::MAX),
-            max_prioritization_fees: AtomicU64::default(),
-        }
-    }
 }
 
 impl ConsumeWorkerCountMetrics {
@@ -1876,17 +1842,6 @@ impl ConsumeWorkerCountMetrics {
                 "cost_model_throttled_transactions_count",
                 self.cost_model_throttled_transactions_count
                     .swap(0, Ordering::Relaxed),
-                i64
-            ),
-            (
-                "min_prioritization_fees",
-                self.min_prioritization_fees
-                    .swap(u64::MAX, Ordering::Relaxed),
-                i64
-            ),
-            (
-                "max_prioritization_fees",
-                self.max_prioritization_fees.swap(0, Ordering::Relaxed),
                 i64
             ),
         );
