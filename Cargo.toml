@@ -12,7 +12,7 @@ members = [
     "bench-streamer",
     "bloom",
     "bls-cert-verify",
-    "bls12-381",
+    "bls12-381-syscall",
     "bucket_map",
     "builtins",
     "builtins-default-costs",
@@ -186,7 +186,6 @@ used_underscore_binding = "deny"
 Inflector = "0.11.4"
 agave-banking-stage-ingress-types = { path = "banking-stage-ingress-types", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 agave-bls-cert-verify = { path = "bls-cert-verify", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
-agave-bls12-381 = { path = "bls12-381", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 agave-feature-set = { path = "feature-set", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 agave-fs = { path = "fs", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 agave-geyser-plugin-interface = { path = "geyser-plugin-interface", version = "=4.1.0-alpha.0" }
@@ -266,7 +265,7 @@ dyn-clone = "1.0.20"
 eager = "0.1.0"
 ed25519-dalek = "=1.0.1"
 enum-iterator = "2.3.0"
-env_logger = "0.11.9"
+env_logger = "0.11.10"
 fast-math = "0.1"
 fd-lock = "4.0.4"
 five8 = "1.0.0"
@@ -395,8 +394,9 @@ solana-bincode = "3.1.0"
 solana-blake3-hasher = "3.1.0"
 solana-bloom = { path = "bloom", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 solana-bls-signatures = { version = "3.2.0", features = ["serde"] }
+solana-bls12-381-syscall = { path = "bls12-381-syscall", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 solana-bn254 = "3.2.1"
-solana-borsh = "3.0.1"
+solana-borsh = "3.0.2"
 solana-bpf-loader-program = { path = "programs/bpf_loader", version = "=4.1.0-alpha.0", default-features = false, features = ["agave-unstable-api"] }
 solana-bucket-map = { path = "bucket_map", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
 solana-builtins = { path = "builtins", version = "=4.1.0-alpha.0", features = ["agave-unstable-api"] }
@@ -570,7 +570,7 @@ spl-memo-interface = "2.0.0"
 spl-pod = "0.7.2"
 spl-token-2022-interface = "2.1.0"
 spl-token-confidential-transfer-proof-extraction = "0.5.1"
-spl-token-group-interface = "0.7.0"
+spl-token-group-interface = "0.7.2"
 spl-token-interface = "2.0.0"
 spl-token-metadata-interface = "0.8.0"
 static_assertions = "1.1.0"
