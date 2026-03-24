@@ -108,7 +108,7 @@ use {
     solana_cluster_type::ClusterType,
     solana_compute_budget::compute_budget::ComputeBudget,
     solana_compute_budget_instruction::instructions_processor::process_compute_budget_instructions,
-    solana_cost_model::{block_cost_limits::simd_0286_block_limits, cost_tracker::CostTracker},
+    solana_cost_model::{block_cost_limits::simd_0286_block_limit, cost_tracker::CostTracker},
     solana_epoch_info::EpochInfo,
     solana_epoch_schedule::EpochSchedule,
     solana_feature_gate_interface as feature,
@@ -1912,27 +1912,29 @@ impl Bank {
             "should be populated (from fields.versioned_epoch_stakes)"
         );
 
-        // Compute and validate the slot leader from epoch stakes
-        let leader: SlotLeader;
-        #[cfg(not(feature = "dev-context-only-utils"))]
-        {
-            _ = leader_for_tests;
-            leader = Self::slot_leader_from_epoch_stakes(
-                fields.slot,
-                &fields.epoch_schedule,
-                &epoch_stakes,
-            );
-        }
-        #[cfg(feature = "dev-context-only-utils")]
-        {
-            leader = leader_for_tests.unwrap_or_else(|| {
+        // Compute and validate the slot leader from epoch stakes.
+        let compute_leader = || {
+            if slot == 0 {
+                // Genesis snapshot has no leader for the genesis block.
+                // Instead the leader is set to the maximum delegated vote account.
+                stakes
+                    .highest_staked_node()
+                    .expect("genesis snapshot should contain at least one staked vote account")
+            } else {
                 Self::slot_leader_from_epoch_stakes(
                     fields.slot,
                     &fields.epoch_schedule,
                     &epoch_stakes,
                 )
-            });
-        }
+            }
+        };
+        #[cfg(not(feature = "dev-context-only-utils"))]
+        let leader = {
+            _ = leader_for_tests;
+            compute_leader()
+        };
+        #[cfg(feature = "dev-context-only-utils")]
+        let leader = leader_for_tests.unwrap_or_else(compute_leader);
         assert_eq!(
             fields.leader_id, leader.id,
             "snapshot leader_id does not match computed slot leader"
@@ -4456,6 +4458,27 @@ impl Bank {
         self.rc.accounts.clone()
     }
 
+    fn apply_cost_tracker_limits_for_active_features(&mut self) {
+        let mut cost_tracker = self.write_cost_tracker().unwrap();
+        let block_cost_limit = if self
+            .feature_set
+            .is_active(&feature_set::raise_block_limits_to_100m::id())
+        {
+            simd_0286_block_limit()
+        } else {
+            cost_tracker.get_block_limit()
+        };
+        let account_cost_limit = block_cost_limit.saturating_mul(40).saturating_div(100);
+        let vote_cost_limit = cost_tracker.get_vote_limit();
+        let allocated_data_size_limit = cost_tracker.get_allocated_data_size_limit();
+        cost_tracker.set_limits(
+            account_cost_limit,
+            block_cost_limit,
+            vote_cost_limit,
+            allocated_data_size_limit,
+        );
+    }
+
     fn apply_simd_0339_invoke_cost_changes(&mut self) {
         let simd_0268_active = self
             .feature_set
@@ -4486,23 +4509,7 @@ impl Bank {
         // We must apply previously activated features related to limits here
         // so that the initial bank state is consistent with the feature set.
         // Cost-tracker limits are propagated through children banks.
-        if self
-            .feature_set
-            .is_active(&feature_set::raise_block_limits_to_100m::id())
-        {
-            let block_cost_limit = simd_0286_block_limits();
-            let mut cost_tracker = self.write_cost_tracker().unwrap();
-            let account_cost_limit = block_cost_limit.saturating_mul(40).saturating_div(100);
-            let vote_cost_limit = cost_tracker.get_vote_limit();
-            let allocated_data_size_limit = cost_tracker.get_allocated_data_size_limit();
-            cost_tracker.set_limits(
-                account_cost_limit,
-                block_cost_limit,
-                vote_cost_limit,
-                allocated_data_size_limit,
-            );
-        }
-
+        self.apply_cost_tracker_limits_for_active_features();
         self.apply_simd_0339_invoke_cost_changes();
 
         let program_runtime_environment =
@@ -5727,19 +5734,8 @@ impl Bank {
         }
 
         self.apply_new_builtin_program_feature_transitions(&new_feature_activations);
-
         if new_feature_activations.contains(&feature_set::raise_block_limits_to_100m::id()) {
-            let block_cost_limit = simd_0286_block_limits();
-            let mut cost_tracker = self.write_cost_tracker().unwrap();
-            let account_cost_limit = block_cost_limit.saturating_mul(40).saturating_div(100);
-            let vote_cost_limit = cost_tracker.get_vote_limit();
-            let allocated_data_size_limit = cost_tracker.get_allocated_data_size_limit();
-            cost_tracker.set_limits(
-                account_cost_limit,
-                block_cost_limit,
-                vote_cost_limit,
-                allocated_data_size_limit,
-            );
+            self.apply_cost_tracker_limits_for_active_features();
         }
 
         if new_feature_activations.contains(&feature_set::vote_state_v4::id()) {
