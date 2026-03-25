@@ -3,7 +3,7 @@ use {
     crate::{
         device::{NetworkDevice, QueueId},
         load_xdp_program,
-        route::Router,
+        route::{RouteTable, Router, RoutingTables},
         route_monitor::RouteMonitor,
         set_cpu_affinity,
         tx_loop::TxPacket,
@@ -14,7 +14,11 @@ use {
     aya::Ebpf,
     crossbeam_channel::TryRecvError,
     log::info,
-    std::{net::Ipv4Addr, thread::Builder, time::Duration},
+    std::{
+        net::{IpAddr, Ipv4Addr},
+        thread::Builder,
+        time::Duration,
+    },
 };
 use {
     bytes::Bytes,
@@ -265,18 +269,19 @@ impl TransmitterBuilder {
             .map(|tx_loop_builder| tx_loop_builder.build())
             .collect::<Vec<_>>();
 
-        let router_result = Router::new();
+        let tables_result = RoutingTables::from_netlink(RouteTable::Main);
 
         caps::drop(None, CapSet::Effective, CAP_NET_RAW).expect("drop CAP_NET_RAW capability");
         caps::drop(None, CapSet::Effective, CAP_NET_ADMIN).expect("drop CAP_NET_ADMIN capability");
 
-        let mut router = router_result?;
-        router.build_caches()?;
+        let tables = tables_result?;
+        let router = Router::from_tables(tables.clone())?;
 
         // Use ArcSwap for lock-free updates of the routing table
         let atomic_router = Arc::new(ArcSwap::from_pointee(router));
         let route_monitor_handle = RouteMonitor::start(
             Arc::clone(&atomic_router),
+            tables,
             exit.clone(),
             ROUTE_MONITOR_UPDATE_INTERVAL,
             || {
@@ -356,7 +361,10 @@ impl TransmitterBuilder {
                     .spawn(move || {
                         tx_loop.run(receiver, drop_sender, move |ip| {
                             let r = atomic_router.load();
-                            r.route(*ip).ok()
+                            match ip {
+                                IpAddr::V4(ip) => r.route_v4(*ip).ok(),
+                                IpAddr::V6(_) => None,
+                            }
                         })
                     })
                     .unwrap(),
