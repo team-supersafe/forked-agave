@@ -20,28 +20,10 @@ use {
     std::{
         collections::{HashMap, HashSet, hash_map::Entry},
         ops::Index,
-        sync::{
-            Arc, RwLock,
-            atomic::{AtomicU64, Ordering},
-        },
+        sync::{Arc, RwLock},
         time::Instant,
     },
 };
-
-pub type AtomicSlot = AtomicU64;
-#[derive(Clone)]
-pub struct ReadOnlyAtomicSlot {
-    slot: Arc<AtomicSlot>,
-}
-
-impl ReadOnlyAtomicSlot {
-    pub fn get(&self) -> Slot {
-        // The expectation is that an instance `ReadOnlyAtomicSlot` is on a different thread than
-        // BankForks *and* this instance is being accessed *without* locking BankForks first.
-        // Thus, to ensure atomic ordering correctness, we must use Acquire-Release semantics.
-        self.slot.load(Ordering::Acquire)
-    }
-}
 
 /// Convenience type since often root/working banks are fetched together.
 #[derive(Clone)]
@@ -94,7 +76,7 @@ struct SetRootTimings {
 pub struct BankForks {
     banks: HashMap<Slot, BankWithScheduler>,
     descendants: HashMap<Slot, HashSet<Slot>>,
-    root: Arc<AtomicSlot>,
+    root: Slot,
     working_slot: Slot,
     sharable_banks: SharableBanks,
     highest_slot_at_startup: Slot,
@@ -145,7 +127,7 @@ impl BankForks {
         let migration_status = Arc::new(Self::initialize_migration_status(&root_bank));
 
         let bank_forks = Arc::new(RwLock::new(Self {
-            root: Arc::new(AtomicSlot::new(root_slot)),
+            root: root_slot,
             working_slot: root_slot,
             sharable_banks: SharableBanks {
                 root_bank: Arc::new(ArcSwap::from(root_bank.clone())),
@@ -274,7 +256,7 @@ impl BankForks {
         mode: SchedulingMode,
         mut bank: Bank,
     ) -> BankWithScheduler {
-        if self.root.load(Ordering::Relaxed) < self.highest_slot_at_startup {
+        if self.root < self.highest_slot_at_startup {
             bank.set_check_program_deployment_slot(true);
         }
 
@@ -424,10 +406,7 @@ impl BankForks {
             .get(root)
             .expect("root bank didn't exist in bank_forks");
 
-        // To support `RootBankCache` (via `ReadOnlyAtomicSlot`) accessing `root` *without* locking
-        // BankForks first *and* from a different thread, this store *must* be at least Release to
-        // ensure atomic ordering correctness.
-        self.root.store(root, Ordering::Release);
+        self.root = root;
         self.sharable_banks.root_bank.store(Arc::clone(root_bank));
 
         let new_epoch = root_bank.epoch();
@@ -605,14 +584,7 @@ impl BankForks {
     }
 
     pub fn root(&self) -> Slot {
-        self.root.load(Ordering::Relaxed)
-    }
-
-    /// Gets a read-only wrapper to an atomic slot holding the root slot.
-    pub fn get_atomic_root(&self) -> ReadOnlyAtomicSlot {
-        ReadOnlyAtomicSlot {
-            slot: self.root.clone(),
-        }
+        self.root
     }
 
     /// After setting a new root, prune the banks that are no longer on rooted paths
