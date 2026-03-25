@@ -25,9 +25,7 @@ use {
     },
     solana_accounts_db::{
         accounts::AccountAddressFilter,
-        accounts_index::{
-            AccountIndex, AccountSecondaryIndexes, IndexKey, ScanConfig, ScanOrder, ScanResult,
-        },
+        accounts_index::{AccountIndex, AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult},
     },
     solana_client::connection_cache::Protocol,
     solana_clock::{Slot, UnixTimestamp},
@@ -309,15 +307,11 @@ impl JsonRpcRequestProcessor {
         filters: Vec<RpcFilterType>,
         sort_results: bool,
     ) -> ScanResult<Vec<KeyedAccountSharedData>> {
-        let scan_order = if sort_results {
-            ScanOrder::Sorted
-        } else {
-            ScanOrder::Unsorted
-        };
         let bank = Arc::clone(bank);
         let index_key = index_key.to_owned();
         let program_id = program_id.to_owned();
-        self.runtime
+        let mut accounts = self
+            .runtime
             .spawn_blocking(move || {
                 bank.get_filtered_indexed_accounts(
                     &index_key,
@@ -332,12 +326,16 @@ impl JsonRpcRequestProcessor {
                                 .iter()
                                 .all(|filter_type| filter_allows(filter_type, account))
                     },
-                    &ScanConfig::new(scan_order),
+                    &ScanConfig::default(),
                     bank.byte_limit_for_scans(),
                 )
             })
             .await
-            .expect("Failed to spawn blocking task")
+            .expect("Failed to spawn blocking task")?;
+        if sort_results {
+            accounts.sort_unstable_by(|(a_addr, _), (b_addr, _)| a_addr.cmp(b_addr));
+        }
+        Ok(accounts)
     }
 
     #[allow(deprecated)]
@@ -1848,6 +1846,7 @@ impl JsonRpcRequestProcessor {
         let SignatureInfosForAddress {
             infos: mut results,
             found_before,
+            found_until,
         } = self
             .blockstore
             .get_confirmed_signatures_for_address2(address, highest_slot, before, until, limit)
@@ -1874,7 +1873,7 @@ impl JsonRpcRequestProcessor {
                 .collect()
         };
 
-        if results.len() < limit {
+        if results.len() < limit || !found_until {
             if let Some(bigtable_ledger_storage) = &self.bigtable_ledger_storage {
                 let mut bigtable_before = before;
                 if !results.is_empty() {
@@ -1890,7 +1889,7 @@ impl JsonRpcRequestProcessor {
                         .get_signature_status(&bigtable_before.unwrap())
                         .await
                     {
-                        Err(StorageError::SignatureNotFound) => {
+                        Err(StorageError::SignatureNotFound(_)) => {
                             bigtable_before = None;
                         }
                         Err(err) => {
@@ -1924,10 +1923,36 @@ impl JsonRpcRequestProcessor {
                             }
                         }
                     }
-                    Err(StorageError::SignatureNotFound) => {}
+                    Err(StorageError::SignatureNotFound(not_found_signature)) => {
+                        // bigtable_before is checked above
+                        // SignatureNotFound means the blockstore before was not found, or the until signature was never found.
+                        return Err(RpcCustomError::FilterTransactionNotFound {
+                            signature: not_found_signature.to_string(),
+                        }
+                        .into());
+                    }
                     Err(err) => {
                         warn!("Failed to query Bigtable: {err:?}");
                         return Err(RpcCustomError::LongTermStorageUnreachable.into());
+                    }
+                }
+            } else {
+                // Long-term storage is not enabled.
+                // Return an error to the user if either before/until were provided but not found.
+                if !found_before {
+                    if let Some(signature) = before {
+                        return Err(RpcCustomError::FilterTransactionNotFound {
+                            signature: signature.to_string(),
+                        }
+                        .into());
+                    }
+                }
+                if !found_until {
+                    if let Some(signature) = until {
+                        return Err(RpcCustomError::FilterTransactionNotFound {
+                            signature: signature.to_string(),
+                        }
+                        .into());
                     }
                 }
             }
@@ -2228,12 +2253,8 @@ impl JsonRpcRequestProcessor {
             })
         } else {
             // this path does not need to provide a mb limit because we only want to support secondary indexes
-            let scan_order = if sort_results {
-                ScanOrder::Sorted
-            } else {
-                ScanOrder::Unsorted
-            };
-            self.runtime
+            let mut accounts = self
+                .runtime
                 .spawn_blocking(move || {
                     bank.get_filtered_program_accounts(
                         &program_id,
@@ -2242,14 +2263,18 @@ impl JsonRpcRequestProcessor {
                                 .iter()
                                 .all(|filter_type| filter_allows(filter_type, account))
                         },
-                        &ScanConfig::new(scan_order),
+                        &ScanConfig::default(),
                     )
                     .map_err(|e| RpcCustomError::ScanError {
                         message: e.to_string(),
                     })
                 })
                 .await
-                .expect("Failed to spawn blocking task")
+                .expect("Failed to spawn blocking task")?;
+            if sort_results {
+                accounts.sort_unstable_by(|(a_addr, _), (b_addr, _)| a_addr.cmp(b_addr));
+            }
+            Ok(accounts)
         }
     }
 
@@ -5017,15 +5042,12 @@ pub mod tests {
 
         fn advance_bank_to_confirmed_slot(&self, slot: Slot) -> Arc<Bank> {
             let parent_bank = self.working_bank();
+            let child_bank = Bank::new_from_parent(parent_bank, SlotLeader::default(), slot);
             let bank = self
                 .bank_forks
                 .write()
                 .unwrap()
-                .insert(Bank::new_from_parent(
-                    parent_bank,
-                    SlotLeader::default(),
-                    slot,
-                ))
+                .insert(child_bank)
                 .clone_without_scheduler();
 
             let new_block_commitment = BlockCommitmentCache::new(
